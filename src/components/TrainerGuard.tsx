@@ -39,10 +39,16 @@ export default function TrainerGuard({
           return;
         }
 
-        if (profile?.role !== "trainer") {
-          router.replace("/client/dashboard");
-          return;
-        }
+if (profile?.role !== "trainer") {
+  setChecking(false);
+  setAllowed(false);
+  console.log("Trainer guard blocked:", {
+    userId: user.id,
+    profile,
+    profileError,
+  });
+  return;
+}
 
         setAllowed(true);
       } catch (error) {
