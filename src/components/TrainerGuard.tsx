@@ -16,42 +16,57 @@ export default function TrainerGuard({
 
   useEffect(() => {
     const checkTrainer = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-      if (!user) {
+        if (userError || !user) {
+          router.replace("/login");
+          return;
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error("Trainer guard profile error:", profileError);
+          router.replace("/login");
+          return;
+        }
+
+        if (profile?.role !== "trainer") {
+          router.replace("/client/dashboard");
+          return;
+        }
+
+        setAllowed(true);
+      } catch (error) {
+        console.error("Trainer guard error:", error);
         router.replace("/login");
-        return;
+      } finally {
+        setChecking(false);
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profile?.role !== "trainer") {
-        router.replace("/client/dashboard");
-        return;
-      }
-
-      setAllowed(true);
-      setChecking(false);
     };
 
     checkTrainer();
   }, [router]);
 
-  if (checking || !allowed) {
+  if (checking) {
     return (
       <main className={styles.page}>
         <div className={styles.container}>
-          <p className={styles.body}>Checking access...</p>
+          <p className={styles.body}>Checking trainer access...</p>
         </div>
       </main>
     );
   }
+
+  if (!allowed) return null;
 
   return <>{children}</>;
 }
