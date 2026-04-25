@@ -13,28 +13,7 @@ type ProgramTemplate = {
   days_per_week: number | null;
 };
 
-useEffect(() => {
-  const checkRole = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "trainer") {
-      window.location.href = "/client/dashboard";
-    }
-  };
-
-  checkRole();
-}, []);
 
 export default function TrainerProgramTemplatesPage() {
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);

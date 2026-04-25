@@ -134,28 +134,7 @@ function getStatusClasses(status: "green" | "amber" | "red") {
   return "border-red-200 bg-red-50 text-red-700";
 }
 
-useEffect(() => {
-  const checkRole = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "trainer") {
-      window.location.href = "/client/dashboard";
-    }
-  };
-
-  checkRole();
-}, []);
 
 export default function ClientDetailPage({ params }: PageProps) {
   const [clientId, setClientId] = useState("");
