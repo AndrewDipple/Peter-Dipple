@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
-
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const router = useRouter();
 
@@ -50,40 +50,75 @@ export default function LoginPage() {
     setLoading(false);
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      alert("Please enter your email address first.");
+      return;
+    }
+
+    setResetLoading(true);
+
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/reset-password`
+        : undefined;
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo,
+    });
+
+    if (error) {
+      alert("Error sending password reset email.");
+    } else {
+      alert("Password reset email sent. Please check your inbox.");
+    }
+
+    setResetLoading(false);
+  };
+
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
+    <main className={styles.page}>
       <div className="mx-auto max-w-md rounded-2xl bg-white p-6 shadow">
-        <h1 className="text-2xl font-bold">Login</h1>
+        <PageHeader title="Login" />
 
         <form onSubmit={handleLogin} className="mt-6 space-y-4">
           <div>
-            <label className="text-sm font-medium">Email</label>
+            <label className="text-sm font-medium text-[#111111]">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              className={styles.input}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Password</label>
+            <label className="text-sm font-medium text-[#111111]">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              className={styles.input}
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
+            className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
           >
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
+
+        <button
+          type="button"
+          onClick={handleForgotPassword}
+          disabled={resetLoading}
+          className="mt-4 text-sm font-medium text-[#1F6F5E] underline disabled:opacity-50"
+        >
+          {resetLoading ? "Sending reset email..." : "Forgot password?"}
+        </button>
       </div>
     </main>
   );
