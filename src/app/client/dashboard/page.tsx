@@ -12,6 +12,7 @@ type Client = {
   calorie_target: number | null;
   protein_g: number | null;
   profile_id: string | null;
+  onboarding_complete: boolean | null;
 };
 
 type ClientProgramDay = {
@@ -50,7 +51,7 @@ export default function ClientDashboardPage() {
   const [latestWeight, setLatestWeight] = useState<WeightLog | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
   const completedExercises = useMemo(() => {
     return dayExercises.filter((exercise) => {
@@ -99,6 +100,11 @@ export default function ClientDashboardPage() {
       return;
     }
 
+    if (clientData.onboarding_complete === false) {
+      window.location.href = "/client/onboarding";
+      return;
+    }
+
     setClient(clientData);
 
     const { data: weightData } = await supabase
@@ -108,11 +114,7 @@ export default function ClientDashboardPage() {
       .order("log_date", { ascending: false })
       .limit(1);
 
-    if (weightData && weightData.length > 0) {
-      setLatestWeight(weightData[0]);
-    } else {
-      setLatestWeight(null);
-    }
+    setLatestWeight(weightData && weightData.length > 0 ? weightData[0] : null);
 
     const { data: clientProgramData, error: clientProgramError } = await supabase
       .from("client_programs")
@@ -120,6 +122,11 @@ export default function ClientDashboardPage() {
       .eq("client_id", clientData.id)
       .order("created_at", { ascending: false })
       .limit(1);
+
+      if (!clientProgramError && (!clientProgramData || clientProgramData.length === 0)) {
+  window.location.href = "/client/onboarding";
+  return;
+}
 
     if (!clientProgramError && clientProgramData && clientProgramData.length > 0) {
       const program = clientProgramData[0];
@@ -155,11 +162,7 @@ export default function ClientDashboardPage() {
               .eq("client_program_day_id", firstIncompleteDay.id)
               .in("client_program_day_exercise_id", exerciseIds);
 
-            if (!setLogError && setLogData) {
-              setSetLogs(setLogData);
-            } else {
-              setSetLogs([]);
-            }
+            setSetLogs(!setLogError && setLogData ? setLogData : []);
           } else {
             setSetLogs([]);
           }
@@ -175,8 +178,7 @@ export default function ClientDashboardPage() {
     } else {
       setCurrentDay(null);
       setDayExercises([]);
-      setSetLogs([]);
-    }
+setSetLogs([]);    }
 
     let recipeCaloriesTotal = 0;
     let customCaloriesTotal = 0;
@@ -195,7 +197,6 @@ export default function ClientDashboardPage() {
           : item.recipes?.calories;
 
         const quantity = item.quantity ?? 1;
-
         return sum + (recipeCalories ?? 0) * quantity;
       }, 0);
     }
@@ -291,6 +292,7 @@ export default function ClientDashboardPage() {
                   ? `Latest weight: ${latestWeight.weight_kg} kg`
                   : "Track weight, measurements, and progress photos"}
               </p>
+
               <div className="mt-3 h-20 rounded-xl bg-white/70 p-3">
                 <div className="flex h-full items-end gap-2">
                   <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "35%" }} />
@@ -301,6 +303,7 @@ export default function ClientDashboardPage() {
                   <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "82%" }} />
                 </div>
               </div>
+
               <p className="mt-2 text-sm text-[#2B2B2B]">
                 View graphs, measurements, and photos
               </p>
