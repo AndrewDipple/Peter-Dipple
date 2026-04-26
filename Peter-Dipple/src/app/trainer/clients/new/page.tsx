@@ -8,8 +8,7 @@ import { styles } from "@/lib/design";
 export default function NewClientPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [calories, setCalories] = useState("");
-  const [protein, setProtein] = useState("");
+
 
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
