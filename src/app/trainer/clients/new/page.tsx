@@ -1,95 +1,90 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
+import { useState } from "react";
 import { styles } from "@/lib/design";
+import Link from "next/link";
 
 export default function NewClientPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [calories, setCalories] = useState("");
-  const [protein, setProtein] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const { error } = await supabase.from("clients").insert([
-      {
-        full_name: fullName,
-        email: email,
-        calorie_target: Number(calories),
-        protein_g: Number(protein),
-      },
-    ]);
-
-    if (error) {
-      console.error(error);
-      alert("Error saving client");
+    if (!fullName.trim() || !email.trim()) {
+      alert("Please enter name and email");
       return;
     }
 
-    alert("Client created!");
+    setSaving(true);
+
+    const response = await fetch("/api/invite-client", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        origin: window.location.origin,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      alert(result.error || "Error creating client");
+      setSaving(false);
+      return;
+    }
+
+    alert("Client created and invite email sent!");
     setFullName("");
     setEmail("");
-    setCalories("");
-    setProtein("");
+    setSaving(false);
   };
 
-  return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-md rounded-2xl bg-white p-6 shadow">
-        <h1 className="text-2xl font-bold">Add New Client</h1>
+return (
+    <>
+      <div className="mb-6 flex items-center gap-4">
+        <Link href="/trainer/clients" className={styles.buttonSecondary}>
+          ← Back
+        </Link>
+        <h1 className={styles.display}>Add New Client</h1>
+      </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+      <div className="mx-auto max-w-md">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Full Name</label>
+            <label className="text-sm font-medium text-ink">Full Name</label>
             <input
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              className={styles.input}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Email</label>
+            <label className="text-sm font-medium text-ink">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Calorie Target</label>
-            <input
-              type="number"
-              value={calories}
-              onChange={(e) => setCalories(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium">Protein (g)</label>
-            <input
-              type="number"
-              value={protein}
-              onChange={(e) => setProtein(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+              className={styles.input}
             />
           </div>
 
           <button
             type="submit"
-            className="w-full rounded-xl bg-black px-4 py-3 text-white"
+            disabled={saving}
+            className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
           >
-            Create Client
+            {saving ? "Sending invite..." : "Create Client + Send Invite"}
           </button>
         </form>
       </div>
-    </main>
+    </>
   );
 }

@@ -1,16 +1,21 @@
 import Image from "next/image";
 
-export default function Logo() {
+type Props = {
+  variant?: "white" | "black" | "gold";
+  className?: string;
+};
+
+export default function Logo({ variant = "black", className = "" }: Props) {
+  const src = `/logo-${variant}.png`;
+
   return (
-    <div className="flex items-center">
-      <Image
-        src="/logo-white.png"
-        alt="Peter Training Therapy"
-  width={400}
-  height={400}
-        className="h-24 w-auto object-contain"
-        priority
-      />
-    </div>
+    <Image
+      src={src}
+      alt="Peter Training Therapy"
+      width={400}
+      height={400}
+      className={`h-full w-auto object-contain ${className}`}
+      priority
+    />
   );
 }

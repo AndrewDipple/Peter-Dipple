@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Recipe = {
@@ -345,272 +344,252 @@ export default function ClientNutritionPage() {
   }, [recipeCaloriesTotal, customCaloriesTotal]);
 
   return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="Nutrition" showClientNav />
+    <>
+      <h1 className={styles.display}>Nutrition</h1>
 
-        <div className="space-y-6">
-          <div className={`${styles.card} bg-[#F2F2F2]`}>
-            <h2 className={styles.subheading}>Today’s Calories</h2>
-            <p className="mt-2 text-2xl font-bold text-[#111111]">
-              {todayCalories} kcal
+      <div className="mt-6 space-y-6">
+        <div className={`${styles.card} bg-surface-sunken`}>
+          <h2 className={styles.h2}>Today's Calories</h2>
+          <p className="mt-2 text-2xl font-bold text-ink">
+            {todayCalories} kcal
+          </p>
+          <p className="mt-1 text-sm text-ink-muted">{today}</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <Link
+            href="/client/meal-planner"
+            className={`${styles.cardInteractive} bg-surface-sunken`}
+          >
+            <p className="text-sm text-ink-muted">Meal Planner</p>
+            <p className="mt-1 text-lg font-semibold text-ink">
+              Plan meals ahead of time
             </p>
-            <p className="mt-1 text-sm text-[#2B2B2B]">{today}</p>
-          </div>
+            <p className="mt-2 text-sm text-ink-muted">
+              Build your upcoming meals before the day arrives
+            </p>
+          </Link>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Link
-              href="/client/meal-planner"
-              className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea]`}
-            >
-              <p className="text-sm text-[#2B2B2B]">Meal Planner</p>
-              <p className="mt-1 text-lg font-semibold text-[#111111]">
-                Plan meals ahead of time
-              </p>
-              <p className="mt-2 text-sm text-[#2B2B2B]">
-                Build your upcoming meals before the day arrives
-              </p>
-            </Link>
+          <Link
+            href="/client/shopping-list"
+            className={`${styles.cardInteractive} bg-surface-sunken`}
+          >
+            <p className="text-sm text-ink-muted">Shopping List</p>
+            <p className="mt-1 text-lg font-semibold text-ink">
+              Collated ingredients from planned meals
+            </p>
+            <p className="mt-2 text-sm text-ink-muted">
+              Generate a list based on your current meal plan
+            </p>
+          </Link>
 
-            <Link
-              href="/client/shopping-list"
-              className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea]`}
-            >
-              <p className="text-sm text-[#2B2B2B]">Shopping List</p>
-              <p className="mt-1 text-lg font-semibold text-[#111111]">
-                Collated ingredients from planned meals
-              </p>
-              <p className="mt-2 text-sm text-[#2B2B2B]">
-                Generate a list based on your current meal plan
-              </p>
-            </Link>
-          </div>
+          <Link
+            href="/client/recipes"
+            className={`${styles.cardInteractive} bg-surface-sunken`}
+          >
+            <p className="text-sm text-ink-muted">Recipe Menu</p>
+            <p className="mt-1 text-lg font-semibold text-ink">
+              Browse all available recipes
+            </p>
+            <p className="mt-2 text-sm text-ink-muted">
+              View full recipe details, ingredients, and nutrition info
+            </p>
+          </Link>
+        </div>
 
-          <div className={styles.card}>
-            <h2 className={styles.subheading}>Add Recipe Meal</h2>
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Add Recipe Meal</h2>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-              <div>
-                <label className="text-sm font-medium text-[#111111]">
-                  Choose a recipe
-                </label>
-                <select
-                  value={selectedRecipeId}
-                  onChange={(e) => setSelectedRecipeId(e.target.value)}
-                  className={styles.input}
-                >
-                  <option value="">Select a recipe</option>
-                  {recipes.map((recipe) => (
-                    <option key={recipe.id} value={recipe.id}>
-                      {recipe.name}
-                      {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={handleAddRecipeMeal}
-                disabled={addingRecipe}
-                className={styles.buttonPrimary}
-              >
-                {addingRecipe ? "Adding..." : "Add to Eaten Meals"}
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.card}>
-            <h2 className={styles.subheading}>Today’s Recipe Meals</h2>
-
-            <div className="mt-4 space-y-2">
-              {mealLogs.length === 0 ? (
-                <p className={styles.body}>No recipe meals logged today.</p>
-              ) : (
-                mealLogs.map((meal) => {
-                  const quantity = meal.quantity ?? 1;
-                  const caloriesPerMeal = meal.recipes?.calories ?? 0;
-                  const totalMealCalories = caloriesPerMeal * quantity;
-
-                  return (
-                    <div
-                      key={meal.id}
-                      className="flex flex-col gap-3 rounded-lg border border-slate-200 px-3 py-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div>
-                        <p className="font-medium text-[#111111]">
-                          {meal.recipes?.name || "Unnamed meal"}
-                        </p>
-                        <p className="text-sm text-[#2B2B2B]">
-                          {caloriesPerMeal} kcal each
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleQuantityChange(meal.id, Math.max(1, quantity - 1))
-                          }
-                          disabled={updatingMealId === meal.id || quantity <= 1}
-                          className={styles.buttonSecondary}
-                        >
-                          -
-                        </button>
-
-                        <span className="min-w-[90px] text-center text-sm font-medium text-[#111111]">
-                          Qty: {quantity}
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={() => handleQuantityChange(meal.id, quantity + 1)}
-                          disabled={updatingMealId === meal.id}
-                          className={styles.buttonSecondary}
-                        >
-                          +
-                        </button>
-
-                        <span className="min-w-[100px] text-right text-sm font-medium text-[#111111]">
-                          {totalMealCalories} kcal
-                        </span>
-
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRecipeMeal(meal.id)}
-                          disabled={removingMealId === meal.id}
-                          className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className={styles.card}>
-            <h2 className={styles.subheading}>Add Custom Meal</h2>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="text-sm font-medium text-[#111111]">
-                  Meal name
-                </label>
-                <input
-                  type="text"
-                  value={customMealName}
-                  onChange={(e) => setCustomMealName(e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g. Nando's pitta meal"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-[#111111]">
-                  Calories
-                </label>
-                <input
-                  type="number"
-                  value={customMealCalories}
-                  onChange={(e) => setCustomMealCalories(e.target.value)}
-                  className={styles.input}
-                  placeholder="600"
-                />
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="text-sm font-medium text-[#111111]">Note</label>
-              <input
-                type="text"
-                value={customMealNote}
-                onChange={(e) => setCustomMealNote(e.target.value)}
+          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Choose a recipe
+              </label>
+              <select
+                value={selectedRecipeId}
+                onChange={(e) => setSelectedRecipeId(e.target.value)}
                 className={styles.input}
-                placeholder="Optional note"
-              />
+              >
+                <option value="">Select a recipe</option>
+                {recipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>
+                    {recipe.name}
+                    {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <button
-              onClick={handleAddCustomMeal}
-              disabled={savingCustomMeal}
-              className={`${styles.buttonPrimary} mt-4`}
+              onClick={handleAddRecipeMeal}
+              disabled={addingRecipe}
+              className={styles.buttonPrimaryNutrition}
             >
-              {savingCustomMeal ? "Saving..." : "Add Custom Meal"}
+              {addingRecipe ? "Adding..." : "Add to Eaten Meals"}
             </button>
           </div>
+        </div>
 
-          <div className={styles.card}>
-            <h2 className={styles.subheading}>Today’s Custom Meals</h2>
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Today's Recipe Meals</h2>
 
-            <div className="mt-4 space-y-2">
-              {customMeals.length === 0 ? (
-                <p className={styles.body}>No custom meals logged today.</p>
-              ) : (
-                customMeals.map((meal) => (
+          <div className="mt-4 space-y-2">
+            {mealLogs.length === 0 ? (
+              <p className={styles.body}>No recipe meals logged today.</p>
+            ) : (
+              mealLogs.map((meal) => {
+                const quantity = meal.quantity ?? 1;
+                const caloriesPerMeal = meal.recipes?.calories ?? 0;
+                const totalMealCalories = caloriesPerMeal * quantity;
+
+                return (
                   <div
                     key={meal.id}
-                    className="flex flex-col gap-3 rounded-lg border border-slate-200 px-3 py-3 md:flex-row md:items-center md:justify-between"
+                    className="flex flex-col gap-3 rounded-lg border border-border-subtle px-3 py-3 md:flex-row md:items-center md:justify-between"
                   >
                     <div>
-                      <p className="font-medium text-[#111111]">{meal.meal_name}</p>
-                      {meal.note && (
-                        <p className="text-sm text-[#2B2B2B]">{meal.note}</p>
-                      )}
+                      <p className="font-medium text-ink">
+                        {meal.recipes?.name || "Unnamed meal"}
+                      </p>
+                      <p className="text-sm text-ink-muted">
+                        {caloriesPerMeal} kcal each
+                      </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <p className="text-sm font-medium text-[#111111]">
-                        {meal.calories} kcal
-                      </p>
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleRemoveCustomMeal(meal.id)}
-                        disabled={removingCustomMealId === meal.id}
+                        onClick={() =>
+                          handleQuantityChange(meal.id, Math.max(1, quantity - 1))
+                        }
+                        disabled={updatingMealId === meal.id || quantity <= 1}
+                        className={styles.buttonSecondary}
+                      >
+                        -
+                      </button>
+
+                      <span className="min-w-[90px] text-center text-sm font-medium text-ink">
+                        Qty: {quantity}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuantityChange(meal.id, quantity + 1)}
+                        disabled={updatingMealId === meal.id}
+                        className={styles.buttonSecondary}
+                      >
+                        +
+                      </button>
+
+                      <span className="min-w-[100px] text-right text-sm font-medium text-ink">
+                        {totalMealCalories} kcal
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRecipeMeal(meal.id)}
+                        disabled={removingMealId === meal.id}
                         className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
                       >
                         Remove
                       </button>
                     </div>
                   </div>
-                ))
-              )}
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Add Custom Meal</h2>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Meal name
+              </label>
+              <input
+                type="text"
+                value={customMealName}
+                onChange={(e) => setCustomMealName(e.target.value)}
+                className={styles.input}
+                placeholder="e.g. Nando's pitta meal"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Calories
+              </label>
+              <input
+                type="number"
+                value={customMealCalories}
+                onChange={(e) => setCustomMealCalories(e.target.value)}
+                className={styles.input}
+                placeholder="600"
+              />
             </div>
           </div>
 
-          <div>
-            {loading ? (
-              <p className={styles.body}>Loading meals...</p>
-            ) : recipes.length === 0 ? (
-              <p className={styles.body}>No meals available yet.</p>
+          <div className="mt-4">
+            <label className="text-sm font-medium text-ink">Note</label>
+            <input
+              type="text"
+              value={customMealNote}
+              onChange={(e) => setCustomMealNote(e.target.value)}
+              className={styles.input}
+              placeholder="Optional note"
+            />
+          </div>
+
+          <button
+            onClick={handleAddCustomMeal}
+            disabled={savingCustomMeal}
+            className={`${styles.buttonPrimaryNutrition} mt-4`}
+          >
+            {savingCustomMeal ? "Saving..." : "Add Custom Meal"}
+          </button>
+        </div>
+
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Today's Custom Meals</h2>
+
+          <div className="mt-4 space-y-2">
+            {customMeals.length === 0 ? (
+              <p className={styles.body}>No custom meals logged today.</p>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                {recipes.map((recipe) => (
-                  <Link key={recipe.id} href={`/client/nutrition/${recipe.id}`}>
-                    <div className={`${styles.card} hover:bg-[#F2F2F2]`}>
-                      {recipe.image_url && (
-                        <img
-                          src={recipe.image_url}
-                          alt={recipe.name}
-                          className="mb-3 h-40 w-full rounded-xl object-cover"
-                        />
-                      )}
-                      <h2 className="font-semibold text-[#111111]">{recipe.name}</h2>
-                      <p className="mt-1 text-sm text-[#2B2B2B]">
-                        {recipe.description || "No description"}
-                      </p>
-                      <p className="mt-2 text-sm text-[#111111]">
-                        Calories: {recipe.calories ?? "-"}
-                      </p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              customMeals.map((meal) => (
+                <div
+                  key={meal.id}
+                  className="flex flex-col gap-3 rounded-lg border border-border-subtle px-3 py-3 md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <p className="font-medium text-ink">{meal.meal_name}</p>
+                    {meal.note && (
+                      <p className="text-sm text-ink-muted">{meal.note}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm font-medium text-ink">
+                      {meal.calories} kcal
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCustomMeal(meal.id)}
+                      disabled={removingCustomMealId === meal.id}
+                      className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
       </div>
-    </main>
+    </>
   );
 }

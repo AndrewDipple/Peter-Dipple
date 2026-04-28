@@ -28,7 +28,7 @@ function getRecipeTags(recipe: Recipe) {
   return tags;
 }
 
-export default function TrainerRecipesPage() {
+export default function ClientRecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -66,20 +66,15 @@ export default function TrainerRecipesPage() {
     });
   }, [recipes, showVegetarian, showVegan, showDairyFree, showGlutenFree]);
 
-return (
+  return (
     <>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className={styles.display}>Recipes</h1>
-        <Link href="/trainer/recipes/new" className={styles.buttonPrimary}>
-          Add Recipe
-        </Link>
-      </div>
+      <h1 className={styles.display}>Recipe Menu</h1>
 
-      <div className={styles.card}>
+      <div className={`${styles.card} mt-6`}>
         <div>
-          <h2 className={styles.h2}>Recipe Menu</h2>
+          <h2 className={styles.h2}>Filter Recipes</h2>
           <p className="mt-1 text-sm text-ink-muted">
-            Filter recipes by dietary tags.
+            Browse recipes by dietary requirements.
           </p>
         </div>
 
@@ -132,7 +127,7 @@ return (
             const tags = getRecipeTags(recipe);
 
             return (
-              <Link key={recipe.id} href={`/trainer/recipes/${recipe.id}`}>
+              <Link key={recipe.id} href={`/client/nutrition/${recipe.id}`}>
                 <div className="cursor-pointer rounded-xl border border-border-subtle p-4 transition hover:bg-surface-sunken">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
@@ -148,7 +143,7 @@ return (
                           tags.map((tag) => (
                             <span
                               key={tag}
-                              className="rounded-full border border-gold px-3 py-1 text-xs font-medium text-ink"
+                              className="rounded-full border border-emerald px-3 py-1 text-xs font-medium text-ink"
                             >
                               {tag}
                             </span>

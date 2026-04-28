@@ -1,25 +1,71 @@
 @import "tailwindcss";
 
-:root {
-  --background: #cdccccc1;
-  --foreground: #171717;
+/* ==========================================================================
+   PETER TRAINING — DESIGN TOKENS
+   Single source of truth for colours, type, spacing, radius, shadows.
+   Tailwind v4 @theme block: every token here generates a utility class.
+   ========================================================================== */
+
+@theme {
+  /* -- Colours: brand ----------------------------------------------------- */
+  --color-ink: #111111;
+  --color-ink-muted: #2B2B2B;
+  --color-ink-subtle: #6B6B6B;
+
+  --color-surface-base: #FAFAFA;     /* page background */
+  --color-surface-raised: #FFFFFF;   /* cards, modals */
+  --color-surface-sunken: #F2F2F2;   /* inset areas, subtle wells */
+  --color-surface-deep: #1C2A44;     /* navy contrast blocks */
+
+  --color-gold: #D4AF37;             /* rare brand accent */
+  --color-emerald: #1F6F5E;          /* success / wellbeing */
+  --color-navy: #1C2A44;             /* depth, structural blocks */
+
+  /* -- Colours: status ---------------------------------------------------- */
+  --color-success: #1F6F5E;
+  --color-warning: #D97706;
+  --color-danger:  #DC2626;
+
+  /* -- Colours: borders --------------------------------------------------- */
+  --color-border-subtle: #E5E5E5;
+  --color-border-strong: #111111;
+
+  /* -- Typography --------------------------------------------------------- */
+  --font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
+  --font-display: 'Poppins', system-ui, -apple-system, sans-serif; /* swap to serif later */
+
+  /* -- Radius ------------------------------------------------------------- */
+  --radius-sm: 0.5rem;     /* 8px  - small chips */
+  --radius-md: 0.75rem;    /* 12px - inputs, buttons */
+  --radius-lg: 1rem;       /* 16px - cards */
+  --radius-xl: 1.5rem;     /* 24px - large surfaces */
+
+  /* -- Shadows (premium, soft) ------------------------------------------- */
+--shadow-subtle: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-raised: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --shadow-lifted: 0 10px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10);
 }
 
-
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #d4af37;
-  }
-}
+/* ==========================================================================
+   BASE
+   ========================================================================== */
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: 'Poppins', sans-serif;
+  background: var(--color-surface-base);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-weight: 500; /* Poppins Medium per brand guidelines */
 }
 
+/* Form polish */
 input[type="checkbox"] {
-  accent-color: #1F6F5E;
+  accent-color: var(--color-emerald);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
 }

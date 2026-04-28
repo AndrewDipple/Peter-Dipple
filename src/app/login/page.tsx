@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 export default function LoginPage() {
@@ -76,49 +75,51 @@ export default function LoginPage() {
     setResetLoading(false);
   };
 
-  return (
-    <main className={styles.page}>
-      <div className="mx-auto max-w-md rounded-2xl bg-white p-6 shadow">
-        <PageHeader title="Login" />
+return (
+    <main className="min-h-screen bg-surface-base flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        <h1 className={`${styles.display} text-center mb-6`}>Login</h1>
 
-        <form onSubmit={handleLogin} className="mt-6 space-y-4">
-          <div>
-            <label className="text-sm font-medium text-[#111111]">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className={styles.input}
-            />
-          </div>
+        <div className={styles.card}>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-ink">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={styles.input}
+              />
+            </div>
 
-          <div>
-            <label className="text-sm font-medium text-[#111111]">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={styles.input}
-            />
-          </div>
+            <div>
+              <label className="text-sm font-medium text-ink">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={styles.input}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
+            >
+              {loading ? "Logging in..." : "Login"}
+            </button>
+          </form>
 
           <button
-            type="submit"
-            disabled={loading}
-            className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={resetLoading}
+            className="mt-4 text-sm font-medium text-emerald underline disabled:opacity-50"
           >
-            {loading ? "Logging in..." : "Login"}
+            {resetLoading ? "Sending reset email..." : "Forgot password?"}
           </button>
-        </form>
-
-        <button
-          type="button"
-          onClick={handleForgotPassword}
-          disabled={resetLoading}
-          className="mt-4 text-sm font-medium text-[#1F6F5E] underline disabled:opacity-50"
-        >
-          {resetLoading ? "Sending reset email..." : "Forgot password?"}
-        </button>
+        </div>
       </div>
     </main>
   );

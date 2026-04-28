@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Client = {

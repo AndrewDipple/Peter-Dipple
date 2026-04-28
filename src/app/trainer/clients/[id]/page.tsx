@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
+import Link from "next/link";
 import {
   LineChart,
   Line,
@@ -20,6 +20,17 @@ type Client = {
   email: string;
   calorie_target: number | null;
   protein_g: number | null;
+  date_of_birth: string | null;
+  sex: string | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  training_days_per_week: number | null;
+  activity_level: string | null;
+  workout_location: string | null;
+  bmr_estimate: number | null;
+  tdee_estimate: number | null;
+  onboarding_complete: boolean | null;
+  daily_step_target: number;
 };
 
 type MealLog = {
@@ -112,6 +123,12 @@ type ProgressPhoto = {
   note: string | null;
 };
 
+type DailyTracking = {
+  id: string;
+  water_completed: boolean;
+  steps_logged: number | null;
+};
+
 type PageProps = {
   params: Promise<{
     id: string;
@@ -134,7 +151,13 @@ function getStatusClasses(status: "green" | "amber" | "red") {
   return "border-red-200 bg-red-50 text-red-700";
 }
 
+function formatLabel(value: string | null | undefined) {
+  if (!value) return "-";
 
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export default function ClientDetailPage({ params }: PageProps) {
   const [clientId, setClientId] = useState("");
@@ -150,6 +173,7 @@ export default function ClientDetailPage({ params }: PageProps) {
   const [mealLogs, setMealLogs] = useState<MealLog[]>([]);
   const [customMealLogs, setCustomMealLogs] = useState<CustomMealLog[]>([]);
   const [todayCalories, setTodayCalories] = useState(0);
+  const [dailyTracking, setDailyTracking] = useState<DailyTracking | null>(null);
 
   const [latestWeight, setLatestWeight] = useState<WeightLog | null>(null);
   const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
@@ -337,6 +361,19 @@ export default function ClientDetailPage({ params }: PageProps) {
       setSetLogs([]);
       setDayExercises([]);
       setReviewedDayId(null);
+      setDailyTracking(null);
+
+      // Load daily tracking
+      const { data: trackingData } = await supabase
+        .from("daily_tracking")
+        .select("*")
+        .eq("client_id", clientId)
+        .eq("log_date", selectedDate)
+        .maybeSingle();
+
+      if (trackingData) {
+        setDailyTracking(trackingData);
+      }
 
       let recipeCaloriesTotal = 0;
       let customCaloriesTotal = 0;
@@ -561,179 +598,126 @@ export default function ClientDetailPage({ params }: PageProps) {
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
   return (
-    <main className={styles.page}>
-      <div className="mx-auto max-w-6xl rounded-2xl bg-white p-6 shadow">
-        <PageHeader
-          title="Client Detail"
-          backHref="/trainer/clients"
-          showTrainerNav
-        />
+    <>
+      <div className="mb-6 flex items-center gap-4">
+        <Link href="/trainer/clients" className={styles.buttonSecondary}>
+          ← Back
+        </Link>
+        <h1 className={styles.display}>Client Detail</h1>
+      </div>
 
-        {loading ? (
-          <p className={styles.body}>Loading...</p>
-        ) : !client ? (
-          <p className={styles.body}>Client not found</p>
-        ) : (
-          <div className="space-y-6">
+      {loading ? (
+        <p className={styles.body}>Loading...</p>
+      ) : !client ? (
+        <p className={styles.body}>Client not found</p>
+      ) : (
+        <div className="space-y-8">
+          {/* CLIENT SUMMARY */}
+          <section>
+            <h2 className="mb-4 text-2xl font-bold text-ink">Summary</h2>
+
             <div className={styles.card}>
-              <h2 className="text-xl font-semibold text-[#111111]">
+              <h3 className="text-xl font-semibold text-ink">
                 {client.full_name}
-              </h2>
-              <p className="mt-1 text-[#2B2B2B]">{client.email}</p>
+              </h3>
+              <p className="mt-1 text-ink-muted">{client.email}</p>
             </div>
 
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Latest Weight</h3>
-              <p className="mt-2 text-lg font-semibold text-[#111111]">
-                {latestWeight ? `${latestWeight.weight_kg} kg` : "No weight logged yet"}
-              </p>
-              {latestWeight && (
-                <p className="mt-1 text-sm text-[#2B2B2B]">
-                  Logged on {latestWeight.log_date}
-                </p>
-              )}
+            <div className={`${styles.card} mt-4`}>
+              <h3 className="font-semibold text-ink">Onboarding Summary</h3>
 
-              <div className="mt-6">
-                <h4 className="mb-3 text-sm font-medium text-[#111111]">
-                  Weight Progress
-                </h4>
-
-                {weightChartData.length < 2 ? (
-                  <p className={styles.body}>Not enough weight logs yet to show a graph.</p>
-                ) : (
-<div className="w-full min-w-0">
-  <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={weightChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="weight" strokeWidth={2} dot />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 space-y-2">
-                {weightLogs.length === 0 ? (
-                  <p className={styles.body}>No weight history yet.</p>
-                ) : (
-                  weightLogs.slice(0, 10).map((log) => (
-                    <div
-                      key={log.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <span className="text-sm text-[#2B2B2B]">{log.log_date}</span>
-                      <span className="font-medium text-[#111111]">
-                        {log.weight_kg} kg
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Latest Measurements</h3>
-              <p className="mt-2 text-sm text-[#2B2B2B]">
-                Latest waist:{" "}
-                {latestMeasurements?.waist_cm !== null &&
-                latestMeasurements?.waist_cm !== undefined
-                  ? `${latestMeasurements.waist_cm} cm`
-                  : "No measurements logged yet"}
-              </p>
-              {latestMeasurements && (
-                <p className="mt-1 text-sm text-[#2B2B2B]">
-                  Logged on {latestMeasurements.log_date}
-                </p>
-              )}
-
-              <div className="mt-6">
-                <h4 className="mb-3 text-sm font-medium text-[#111111]">
-                  Waist Progress
-                </h4>
-
-                {waistChartData.length < 2 ? (
-                  <p className={styles.body}>
-                    Not enough measurement logs yet to show a graph.
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Height
                   </p>
-                ) : (
-<div className="w-full min-w-0">
-  <ResponsiveContainer width="100%" height={250}>
-                        <LineChart data={waistChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="waist" strokeWidth={2} dot />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
+                  <p className="mt-1 font-semibold text-ink">
+                    {client.height_cm ? `${client.height_cm} cm` : "-"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Weight
+                  </p>
+                  <p className="mt-1 font-semibold text-ink">
+                    {client.weight_kg ? `${client.weight_kg} kg` : "-"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Sex
+                  </p>
+                  <p className="mt-1 font-semibold text-ink">
+                    {formatLabel(client.sex)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Activity
+                  </p>
+                  <p className="mt-1 font-semibold text-ink">
+                    {formatLabel(client.activity_level)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Workout Setup
+                  </p>
+                  <p className="mt-1 font-semibold text-ink">
+                    {formatLabel(client.workout_location)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Days / Week
+                  </p>
+                  <p className="mt-1 font-semibold text-ink">
+                    {client.training_days_per_week ?? "-"}
+                  </p>
+                </div>
               </div>
 
-              <div className="mt-4 space-y-2">
-                {measurementLogs.length === 0 ? (
-                  <p className={styles.body}>No measurement history yet.</p>
-                ) : (
-                  measurementLogs.slice(0, 10).map((log) => (
-                    <div
-                      key={log.id}
-                      className="rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <p className="text-sm font-medium text-[#111111]">
-                        {log.log_date}
-                      </p>
-                      <p className="text-sm text-[#2B2B2B]">
-                        Waist: {log.waist_cm ?? "-"} cm • Hips: {log.hips_cm ?? "-"} cm •
-                        Chest: {log.chest_cm ?? "-"} cm
-                      </p>
-                      <p className="text-sm text-[#2B2B2B]">
-                        Arms: {log.left_arm_cm ?? "-"} / {log.right_arm_cm ?? "-"} cm •
-                        Thighs: {log.left_thigh_cm ?? "-"} / {log.right_thigh_cm ?? "-"} cm
-                      </p>
-                      {log.note && (
-                        <p className="text-sm text-[#2B2B2B]">{log.note}</p>
-                      )}
-                    </div>
-                  ))
-                )}
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-gold p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    BMR Estimate
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-ink">
+                    {client.bmr_estimate ? `${client.bmr_estimate} kcal` : "-"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-gold p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    TDEE Estimate
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-ink">
+                    {client.tdee_estimate ? `${client.tdee_estimate} kcal` : "-"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-emerald p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Calorie Target
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-ink">
+                    {client.calorie_target ? `${client.calorie_target} kcal` : "-"}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Progress Photos</h3>
-
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {progressPhotos.length === 0 ? (
-                  <p className="text-slate-500">No progress photos uploaded yet</p>
-                ) : (
-                  progressPhotos.map((photo) => (
-                    <div key={photo.id} className={`${styles.card} p-3`}>
-                      <img
-                        src={photo.image_url}
-                        alt="Progress"
-                        className="h-56 w-full rounded-xl object-cover"
-                      />
-                      <p className="mt-2 text-sm font-medium text-[#111111]">
-                        {photo.log_date}
-                      </p>
-                      {photo.note && (
-                        <p className="mt-1 text-sm text-[#2B2B2B]">{photo.note}</p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Programme Assignment</h3>
+            <div className={`${styles.card} mt-4`}>
+              <h3 className="font-semibold text-ink">Programme Assignment</h3>
 
               <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">
+                  <label className="text-sm font-medium text-ink">
                     Choose template
                   </label>
                   <select
@@ -750,14 +734,14 @@ export default function ClientDetailPage({ params }: PageProps) {
                   </select>
 
                   {selectedTemplate && (
-                    <p className="mt-2 text-sm text-[#2B2B2B]">
+                    <p className="mt-2 text-sm text-ink-muted">
                       {selectedTemplate.duration_weeks ?? "-"} weeks •{" "}
                       {selectedTemplate.days_per_week ?? "-"} days per week
                     </p>
                   )}
 
                   {clientProgram && (
-                    <p className="mt-2 text-sm text-[#2B2B2B]">
+                    <p className="mt-2 text-sm text-ink-muted">
                       A programme is currently assigned to this client.
                     </p>
                   )}
@@ -774,172 +758,386 @@ export default function ClientDetailPage({ params }: PageProps) {
                 </div>
               </div>
             </div>
+          </section>
 
-            <div className={styles.card}>
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h3 className="font-semibold text-[#111111]">Daily Review</h3>
-                  <p className="mt-1 text-sm text-[#2B2B2B]">{readableDate}</p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate((prev) => shiftDate(prev, -1))}
-                    className={styles.buttonSecondary}
-                  >
-                    Previous Day
-                  </button>
-
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className={styles.input}
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate(getDateString(new Date()))}
-                    className={styles.buttonSecondary}
-                  >
-                    Today
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate((prev) => shiftDate(prev, 1))}
-                    className={styles.buttonSecondary}
-                  >
-                    Next Day
-                  </button>
-                </div>
+          {/* DAILY REVIEW */}
+          <section>
+            <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-ink">Daily Review</h2>
+                <p className="mt-1 text-sm text-ink-muted">{readableDate}</p>
               </div>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate((prev) => shiftDate(prev, -1))}
+                  className={styles.buttonSecondary}
+                >
+                  Previous Day
+                </button>
+
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className={styles.input}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(getDateString(new Date()))}
+                  className={styles.buttonSecondary}
+                >
+                  Today
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate((prev) => shiftDate(prev, 1))}
+                  className={styles.buttonSecondary}
+                >
+                  Next Day
+                </button>
+              </div>
+            </div>
+
+            {/* Workout Section */}
+            <div className="mb-6">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="h-1 w-1 rounded-full bg-navy"></div>
+                <h3 className="text-lg font-semibold text-navy">Workout</h3>
+              </div>
+
+              <div className="space-y-4">
                 <div className={`rounded-xl border p-4 ${getStatusClasses(workoutStatus.status)}`}>
                   <p className="text-xs font-medium uppercase tracking-wide">
-                    Workout
+                    Workout Status
                   </p>
                   <p className="mt-1 text-sm font-semibold">{workoutStatus.label}</p>
                 </div>
 
-                <div className={`rounded-xl border p-4 ${getStatusClasses(nutritionStatus.status)}`}>
-                  <p className="text-xs font-medium uppercase tracking-wide">
-                    Nutrition
-                  </p>
-                  <p className="mt-1 text-sm font-semibold">{nutritionStatus.label}</p>
+                {/* Steps Card */}
+                <div className="rounded-xl border border-navy/20 bg-surface-raised p-4">
+                  <p className="text-sm font-medium text-ink">Steps</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <p className="text-2xl font-bold text-navy">
+                      {dailyTracking?.steps_logged?.toLocaleString() ?? "0"}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      / {client.daily_step_target.toLocaleString()}
+                    </p>
+                  </div>
+                  {dailyTracking?.steps_logged !== null && (
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-sunken">
+                      <div
+                        className="h-full rounded-full bg-navy transition-all"
+                        style={{
+                          width: `${Math.min(
+                            ((dailyTracking?.steps_logged ?? 0) /
+                              client.daily_step_target) *
+                              100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className={styles.card}>
+                  <h4 className="font-semibold text-ink">Workout Logs</h4>
+
+                  <div className="mt-4 space-y-2">
+                    {setLogs.length === 0 ? (
+                      <p className="text-ink-muted">No workout activity logged for this day</p>
+                    ) : (
+                      setLogs.map((log) => {
+                        const exercise = dayExercises.find(
+                          (e) => e.id === log.client_program_day_exercise_id
+                        );
+
+                        return (
+                          <div
+                            key={log.id}
+                            className="rounded-lg border border-border-subtle px-3 py-2"
+                          >
+                            <p className="font-medium text-ink">
+                              {exercise?.exercise_name || "Exercise"}
+                            </p>
+                            <p className="text-sm text-ink-muted">
+                              Set {log.set_number} • {log.actual_weight_kg ?? "-"}kg •{" "}
+                              {log.actual_reps ?? "-"} reps {log.completed ? "✅" : ""}
+                            </p>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Meals Logged</h3>
-
-              <div className="mt-4 rounded-xl bg-[#F2F2F2] p-4">
-                <p className="text-sm text-[#2B2B2B]">Total Calories</p>
-                <p className="text-2xl font-bold text-[#111111]">
-                  {todayCalories} kcal
-                </p>
-                <p className="text-sm text-[#2B2B2B]">{selectedDate}</p>
+            {/* Nutrition Section */}
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <div className="h-1 w-1 rounded-full bg-emerald"></div>
+                <h3 className="text-lg font-semibold text-emerald">Nutrition</h3>
               </div>
 
-              <div className="mt-4 space-y-2">
-                {mealLogs.length === 0 ? (
-                  <p className="text-slate-500">No recipe meals logged for this day</p>
-                ) : (
-                  mealLogs.map((meal) => {
-                    const quantity = meal.quantity ?? 1;
-                    const caloriesPerMeal = meal.recipes?.calories ?? 0;
-                    const totalMealCalories = caloriesPerMeal * quantity;
+              <div className="space-y-4">
+                <div className={`rounded-xl border p-4 ${getStatusClasses(nutritionStatus.status)}`}>
+                  <p className="text-xs font-medium uppercase tracking-wide">
+                    Nutrition Status
+                  </p>
+                  <p className="mt-1 text-sm font-semibold">{nutritionStatus.label}</p>
+                </div>
 
-                    return (
-                      <div
-                        key={meal.id}
-                        className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                      >
-                        <div>
-                          <span className="font-medium text-slate-900">
-                            {meal.recipes?.name || "Unnamed meal"}
-                          </span>
-                          <p className="text-sm text-slate-700">
-                            Quantity: {quantity}
-                          </p>
-                        </div>
-
-                        <span className="text-sm text-slate-800">
-                          {totalMealCalories} kcal
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Custom Meals Logged</h3>
-
-              <div className="mt-4 space-y-2">
-                {customMealLogs.length === 0 ? (
-                  <p className="text-slate-500">No custom meals logged for this day</p>
-                ) : (
-                  customMealLogs.map((meal) => (
-                    <div
-                      key={meal.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <div>
-                        <span className="font-medium text-slate-900">
-                          {meal.meal_name}
-                        </span>
-                        {meal.note && (
-                          <p className="text-sm text-slate-700">{meal.note}</p>
-                        )}
-                      </div>
-
-                      <span className="text-sm text-slate-800">
-                        {meal.calories} kcal
-                      </span>
+                {/* Water Card */}
+                <div className="rounded-xl border border-emerald/20 bg-surface-raised p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-ink">Water (2L target)</p>
+                      <p className="mt-1 text-2xl font-bold text-emerald">
+                        {dailyTracking?.water_completed ? "Complete ✓" : "Not logged"}
+                      </p>
                     </div>
-                  ))
-                )}
+                  </div>
+                </div>
+
+                <div className={styles.card}>
+                  <h4 className="font-semibold text-ink">Total Calories</h4>
+                  <p className="mt-2 text-2xl font-bold text-ink">
+                    {todayCalories} kcal
+                  </p>
+                </div>
+
+                <div className={styles.card}>
+                  <h4 className="font-semibold text-ink">Recipe Meals Logged</h4>
+
+                  <div className="mt-4 space-y-2">
+                    {mealLogs.length === 0 ? (
+                      <p className="text-ink-muted">No recipe meals logged for this day</p>
+                    ) : (
+                      mealLogs.map((meal) => {
+                        const quantity = meal.quantity ?? 1;
+                        const caloriesPerMeal = meal.recipes?.calories ?? 0;
+                        const totalMealCalories = caloriesPerMeal * quantity;
+
+                        return (
+                          <div
+                            key={meal.id}
+                            className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2"
+                          >
+                            <div>
+                              <span className="font-medium text-ink">
+                                {meal.recipes?.name || "Unnamed meal"}
+                              </span>
+                              <p className="text-sm text-ink-muted">
+                                Quantity: {quantity}
+                              </p>
+                            </div>
+
+                            <span className="text-sm text-ink">
+                              {totalMealCalories} kcal
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div className={styles.card}>
+                  <h4 className="font-semibold text-ink">Custom Meals Logged</h4>
+
+                  <div className="mt-4 space-y-2">
+                    {customMealLogs.length === 0 ? (
+                      <p className="text-ink-muted">No custom meals logged for this day</p>
+                    ) : (
+                      customMealLogs.map((meal) => (
+                        <div
+                          key={meal.id}
+                          className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2"
+                        >
+                          <div>
+                            <span className="font-medium text-ink">
+                              {meal.meal_name}
+                            </span>
+                            {meal.note && (
+                              <p className="text-sm text-ink-muted">{meal.note}</p>
+                            )}
+                          </div>
+
+                          <span className="text-sm text-ink">
+                            {meal.calories} kcal
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
+          </section>
 
-            <div className={styles.card}>
-              <h3 className="font-semibold text-[#111111]">Workout Logs</h3>
+          {/* STATS & PROGRESS */}
+          <section>
+            <div className="mb-4 flex items-center gap-2">
+              <div className="h-1 w-1 rounded-full bg-gold"></div>
+              <h2 className="text-2xl font-bold text-gold">Stats & Progress</h2>
+            </div>
 
-              <div className="mt-4 space-y-2">
-                {setLogs.length === 0 ? (
-                  <p className="text-slate-500">No workout activity logged for this day</p>
-                ) : (
-                  setLogs.map((log) => {
-                    const exercise = dayExercises.find(
-                      (e) => e.id === log.client_program_day_exercise_id
-                    );
+            <div className="space-y-4">
+              <div className={styles.card}>
+                <h3 className="font-semibold text-ink">Latest Weight</h3>
+                <p className="mt-2 text-lg font-semibold text-ink">
+                  {latestWeight ? `${latestWeight.weight_kg} kg` : "No weight logged yet"}
+                </p>
+                {latestWeight && (
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Logged on {latestWeight.log_date}
+                  </p>
+                )}
 
-                    return (
+                <div className="mt-6">
+                  <h4 className="mb-3 text-sm font-medium text-ink">
+                    Weight Progress
+                  </h4>
+
+                  {weightChartData.length < 2 ? (
+                    <p className={styles.body}>Not enough weight logs yet to show a graph.</p>
+                  ) : (
+                    <div className="w-full min-w-0">
+                      <ResponsiveContainer width="100%" height={250}>
+                        <LineChart data={weightChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="weight" strokeWidth={2} dot />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {weightLogs.length === 0 ? (
+                    <p className={styles.body}>No weight history yet.</p>
+                  ) : (
+                    weightLogs.slice(0, 10).map((log) => (
                       <div
                         key={log.id}
-                        className="rounded-lg border border-slate-200 px-3 py-2"
+                        className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2"
                       >
-                        <p className="font-medium text-slate-900">
-                          {exercise?.exercise_name || "Exercise"}
-                        </p>
-                        <p className="text-sm text-slate-700">
-                          Set {log.set_number} • {log.actual_weight_kg ?? "-"}kg •{" "}
-                          {log.actual_reps ?? "-"} reps {log.completed ? "✅" : ""}
-                        </p>
+                        <span className="text-sm text-ink-muted">{log.log_date}</span>
+                        <span className="font-medium text-ink">
+                          {log.weight_kg} kg
+                        </span>
                       </div>
-                    );
-                  })
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className={styles.card}>
+                <h3 className="font-semibold text-ink">Latest Measurements</h3>
+                <p className="mt-2 text-sm text-ink-muted">
+                  Latest waist:{" "}
+                  {latestMeasurements?.waist_cm !== null &&
+                  latestMeasurements?.waist_cm !== undefined
+                    ? `${latestMeasurements.waist_cm} cm`
+                    : "No measurements logged yet"}
+                </p>
+                {latestMeasurements && (
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Logged on {latestMeasurements.log_date}
+                  </p>
                 )}
+
+                <div className="mt-6">
+                  <h4 className="mb-3 text-sm font-medium text-ink">
+                    Waist Progress
+                  </h4>
+
+                  {waistChartData.length < 2 ? (
+                    <p className={styles.body}>
+                      Not enough measurement logs yet to show a graph.
+                    </p>
+                  ) : (
+                    <div className="w-full min-w-0">
+                      <ResponsiveContainer width="100%" height={250}>
+                        <LineChart data={waistChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="waist" strokeWidth={2} dot />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {measurementLogs.length === 0 ? (
+                    <p className={styles.body}>No measurement history yet.</p>
+                  ) : (
+                    measurementLogs.slice(0, 10).map((log) => (
+                      <div
+                        key={log.id}
+                        className="rounded-lg border border-border-subtle px-3 py-2"
+                      >
+                        <p className="text-sm font-medium text-ink">
+                          {log.log_date}
+                        </p>
+                        <p className="text-sm text-ink-muted">
+                          Waist: {log.waist_cm ?? "-"} cm • Hips: {log.hips_cm ?? "-"} cm •
+                          Chest: {log.chest_cm ?? "-"} cm
+                        </p>
+                        <p className="text-sm text-ink-muted">
+                          Arms: {log.left_arm_cm ?? "-"} / {log.right_arm_cm ?? "-"} cm •
+                          Thighs: {log.left_thigh_cm ?? "-"} / {log.right_thigh_cm ?? "-"} cm
+                        </p>
+                        {log.note && (
+                          <p className="text-sm text-ink-muted">{log.note}</p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className={styles.card}>
+                <h3 className="font-semibold text-ink">Progress Photos</h3>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {progressPhotos.length === 0 ? (
+                    <p className="text-ink-muted">No progress photos uploaded yet</p>
+                  ) : (
+                    progressPhotos.map((photo) => (
+                      <div key={photo.id} className={`${styles.card} p-3`}>
+                        <img
+                          src={photo.image_url}
+                          alt="Progress"
+                          className="h-56 w-full rounded-xl object-cover"
+                        />
+                        <p className="mt-2 text-sm font-medium text-ink">
+                          {photo.log_date}
+                        </p>
+                        {photo.note && (
+                          <p className="mt-1 text-sm text-ink-muted">{photo.note}</p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
-    </main>
+          </section>
+        </div>
+      )}
+    </>
   );
 }

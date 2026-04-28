@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import PageHeader from "@/components/PageHeader";
+
 
 type Client = {
   id: string;
@@ -35,11 +35,54 @@ type TemplateExercise = {
   sort_order: number | null;
 };
 
-function locationLabel(value: string) {
-  if (value === "gym") return "Gym";
-  if (value === "home_weights") return "Home weights";
-  if (value === "home_bodyweight") return "Home bodyweight";
-  return value;
+function getAge(dateOfBirth: string) {
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && today.getDate() < birthDate.getDate())
+  ) {
+    age--;
+  }
+
+  return age;
+}
+
+function calculateBmr({
+  sex,
+  weightKg,
+  heightCm,
+  age,
+}: {
+  sex: string;
+  weightKg: number;
+  heightCm: number;
+  age: number;
+}) {
+  if (sex === "male") {
+    return 88.362 + 13.397 * weightKg + 4.799 * heightCm - 5.677 * age;
+  }
+
+  return 447.593 + 9.247 * weightKg + 3.098 * heightCm - 4.33 * age;
+}
+
+function getActivityFactor(activityLevel: string) {
+  const factors: Record<string, number> = {
+    sedentary: 1.2,
+    lightly_active: 1.375,
+    moderately_active: 1.55,
+    very_active: 1.725,
+    extra_active: 1.9,
+  };
+
+  return factors[activityLevel] ?? 1.2;
+}
+
+function roundToNearest250(value: number) {
+  return Math.round(value / 250) * 250;
 }
 
 export default function ClientOnboardingPage() {
@@ -51,6 +94,8 @@ export default function ClientOnboardingPage() {
   const [fullName, setFullName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [sex, setSex] = useState("");
+  const [heightCm, setHeightCm] = useState("");
+  const [weightKg, setWeightKg] = useState("");
   const [trainingDays, setTrainingDays] = useState("");
   const [activityLevel, setActivityLevel] = useState("");
   const [workoutLocation, setWorkoutLocation] = useState("");
@@ -220,6 +265,8 @@ export default function ClientOnboardingPage() {
       !fullName.trim() ||
       !dateOfBirth ||
       !sex ||
+      !heightCm ||
+      !weightKg ||
       !trainingDays ||
       !activityLevel ||
       !workoutLocation ||
@@ -229,6 +276,25 @@ export default function ClientOnboardingPage() {
       return;
     }
 
+    const heightNumber = Number(heightCm);
+    const weightNumber = Number(weightKg);
+    const age = getAge(dateOfBirth);
+
+    if (!heightNumber || !weightNumber || age <= 0) {
+      alert("Please check your height, weight, and date of birth.");
+      return;
+    }
+
+    const bmr = calculateBmr({
+      sex,
+      weightKg: weightNumber,
+      heightCm: heightNumber,
+      age,
+    });
+
+    const tdee = bmr * getActivityFactor(activityLevel);
+    const calorieTarget = roundToNearest250(tdee);
+
     setSubmitting(true);
 
     const { error: clientUpdateError } = await supabase
@@ -237,9 +303,14 @@ export default function ClientOnboardingPage() {
         full_name: fullName.trim(),
         date_of_birth: dateOfBirth,
         sex,
+        height_cm: heightNumber,
+        weight_kg: weightNumber,
         training_days_per_week: Number(trainingDays),
         activity_level: activityLevel,
         workout_location: workoutLocation,
+        bmr_estimate: Math.round(bmr),
+        tdee_estimate: Math.round(tdee),
+        calorie_target: calorieTarget,
         onboarding_complete: true,
       })
       .eq("id", client.id);
@@ -261,10 +332,10 @@ export default function ClientOnboardingPage() {
     router.replace("/client/dashboard");
   };
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="Welcome" />
+return (
+    <main className="min-h-screen bg-surface-base p-6">
+      <div className="mx-auto max-w-3xl">
+        <h1 className={`${styles.display} text-center mb-6`}>Welcome!</h1>
 
         {loading ? (
           <p className={styles.body}>Loading onboarding...</p>
@@ -274,7 +345,7 @@ export default function ClientOnboardingPage() {
           <div className="space-y-6">
             <div className={styles.card}>
               <h2 className={styles.subheading}>Let’s get you set up</h2>
-              <p className="mt-2 text-sm text-[#2B2B2B]">
+              <p className="mt-2 text-sm text-ink-muted">
                 Answer these quick questions so we can assign the right starting programme.
               </p>
             </div>
@@ -282,7 +353,7 @@ export default function ClientOnboardingPage() {
             <div className={styles.card}>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">Name</label>
+                  <label className="text-sm font-medium text-ink">Name</label>
                   <input
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
@@ -292,7 +363,43 @@ export default function ClientOnboardingPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">Date of birth</label>
+                  <label className="text-sm font-medium text-ink">Sex</label>
+                  <select
+                    value={sex}
+                    onChange={(e) => setSex(e.target.value)}
+                    className={styles.input}
+                  >
+                    <option value="">Select</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">Height (cm)</label>
+                  <input
+                    type="number"
+                    value={heightCm}
+                    onChange={(e) => setHeightCm(e.target.value)}
+                    className={styles.input}
+                    placeholder="e.g. 178"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">Weight (kg)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={weightKg}
+                    onChange={(e) => setWeightKg(e.target.value)}
+                    className={styles.input}
+                    placeholder="e.g. 82.5"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">Date of birth</label>
                   <input
                     type="date"
                     value={dateOfBirth}
@@ -302,30 +409,23 @@ export default function ClientOnboardingPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">Sex</label>
-                  <select value={sex} onChange={(e) => setSex(e.target.value)} className={styles.input}>
-                    <option value="">Select</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">Current activity level</label>
+                  <label className="text-sm font-medium text-ink">Current activity level</label>
                   <select
                     value={activityLevel}
                     onChange={(e) => setActivityLevel(e.target.value)}
                     className={styles.input}
                   >
                     <option value="">Select</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
+                    <option value="sedentary">Sedentary: Little/no exercise</option>
+                    <option value="lightly_active">Lightly active: 1-3 days/week</option>
+                    <option value="moderately_active">Moderately active: 3-5 days/week</option>
+                    <option value="very_active">Very active: 6-7 days/week</option>
+                    <option value="extra_active">Extra active: Physical job + training</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">
+                  <label className="text-sm font-medium text-ink">
                     How many days per week will you work out?
                   </label>
                   <select
@@ -346,7 +446,7 @@ export default function ClientOnboardingPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">
+                  <label className="text-sm font-medium text-ink">
                     What are your workout plans?
                   </label>
                   <select
@@ -358,21 +458,17 @@ export default function ClientOnboardingPage() {
                     <option value="">Select</option>
                     {availableLocations.map((location) => (
                       <option key={location} value={location}>
-                        {locationLabel(location)}
+                        {location === "gym"
+                          ? "Gym"
+                          : location === "home_weights"
+                          ? "Home - Dumbbells"
+                          : "Home - Bodyweight"}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {selectedTemplate && (
-                <div className="mt-4 rounded-xl bg-[#F2F2F2] p-4">
-                  <p className="text-sm text-[#2B2B2B]">Programme selected</p>
-                  <p className="mt-1 font-semibold text-[#111111]">
-                    {selectedTemplate.name}
-                  </p>
-                </div>
-              )}
 
               <button
                 onClick={handleSubmit}

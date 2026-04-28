@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Client = {
@@ -180,113 +179,111 @@ export default function ClientShoppingListPage() {
     loadPage();
   }, [startDate, endDate]);
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="Shopping List" showClientNav />
+return (
+    <>
+      <h1 className={styles.display}>Shopping List</h1>
 
-        {loading ? (
-          <p className={styles.body}>Loading shopping list...</p>
-        ) : !client ? (
-          <p className={styles.body}>Client not found.</p>
-        ) : (
-          <div className="space-y-6">
-            <div className={`${styles.card} bg-[#F2F2F2]`}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Start date
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className={styles.input}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    End date
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className={styles.input}
-                  />
-                </div>
+      {loading ? (
+        <p className={styles.body}>Loading shopping list...</p>
+      ) : !client ? (
+        <p className={styles.body}>Client not found.</p>
+      ) : (
+        <div className="mt-6 space-y-6">
+          <div className={`${styles.card} bg-surface-sunken`}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Start date
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className={styles.input}
+                />
               </div>
 
-              <p className="mt-4 text-sm text-[#2B2B2B]">
-                {plannedMeals.length} planned meal entries found in this range
-              </p>
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  End date
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className={styles.input}
+                />
+              </div>
             </div>
 
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Collated Shopping List</h2>
+            <p className="mt-4 text-sm text-ink-muted">
+              {plannedMeals.length} planned meal entries found in this range
+            </p>
+          </div>
 
-              <div className="mt-4 space-y-2">
-                {shoppingList.length === 0 ? (
-                  <p className={styles.body}>No ingredients to show yet.</p>
-                ) : (
-                  shoppingList.map((item) => (
-                    <div
-                      key={`${item.ingredient_name}-${item.unit}-${item.note}`}
-                      className="rounded-lg border border-slate-200 px-3 py-3"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <span className="font-medium text-[#111111]">
-                          {item.ingredient_name}
-                        </span>
-                        <span className="text-sm font-medium text-[#111111]">
-                          {Number.isInteger(item.total_quantity)
-                            ? item.total_quantity
-                            : item.total_quantity.toFixed(1)}{" "}
-                          {item.unit}
-                        </span>
-                      </div>
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Collated Shopping List</h2>
 
-                      {item.note && (
-                        <p className="mt-1 text-sm text-[#2B2B2B]">
-                          {item.note}
-                        </p>
-                      )}
+            <div className="mt-4 space-y-2">
+              {shoppingList.length === 0 ? (
+                <p className={styles.body}>No ingredients to show yet.</p>
+              ) : (
+                shoppingList.map((item) => (
+                  <div
+                    key={`${item.ingredient_name}-${item.unit}-${item.note}`}
+                    className="rounded-lg border border-border-subtle px-3 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="font-medium text-ink">
+                        {item.ingredient_name}
+                      </span>
+                      <span className="text-sm font-medium text-ink">
+                        {Number.isInteger(item.total_quantity)
+                          ? item.total_quantity
+                          : item.total_quantity.toFixed(1)}{" "}
+                        {item.unit}
+                      </span>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
 
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Planned Meals in Range</h2>
-
-              <div className="mt-4 space-y-2">
-                {plannedMeals.length === 0 ? (
-                  <p className={styles.body}>No planned meals in this date range.</p>
-                ) : (
-                  plannedMeals.map((meal) => (
-                    <div
-                      key={meal.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <div>
-                        <p className="font-medium text-[#111111]">
-                          {meal.recipes?.name || "Unnamed recipe"}
-                        </p>
-                        <p className="text-sm text-[#2B2B2B]">{meal.planned_date}</p>
-                      </div>
-                      <p className="text-sm font-medium text-[#111111]">
-                        Qty: {meal.quantity}
+                    {item.note && (
+                      <p className="mt-1 text-sm text-ink-muted">
+                        {item.note}
                       </p>
-                    </div>
-                  ))
-                )}
-              </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
-        )}
-      </div>
-    </main>
+
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Planned Meals in Range</h2>
+
+            <div className="mt-4 space-y-2">
+              {plannedMeals.length === 0 ? (
+                <p className={styles.body}>No planned meals in this date range.</p>
+              ) : (
+                plannedMeals.map((meal) => (
+                  <div
+                    key={meal.id}
+                    className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2"
+                  >
+                    <div>
+                      <p className="font-medium text-ink">
+                        {meal.recipes?.name || "Unnamed recipe"}
+                      </p>
+                      <p className="text-sm text-ink-muted">{meal.planned_date}</p>
+                    </div>
+                    <p className="text-sm font-medium text-ink">
+                      Qty: {meal.quantity}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

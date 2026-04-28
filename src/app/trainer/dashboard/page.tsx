@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 import { supabase } from "@/lib/supabase";
 
@@ -11,6 +10,7 @@ type Client = {
   full_name: string;
   email: string;
   calorie_target: number | null;
+  daily_step_target: number;
 };
 
 type WorkoutSetLog = {
@@ -38,6 +38,13 @@ type MealLogRow = {
   }[] | null;
 };
 
+type DailyTracking = {
+  id: string;
+  client_id: string;
+  water_completed: boolean;
+  steps_logged: number | null;
+};
+
 type ClientStatusCard = {
   client: Client;
   workout: {
@@ -48,9 +55,9 @@ type ClientStatusCard = {
     status: "green" | "amber" | "red";
     label: string;
   };
+  steps: number | null;
+  waterCompleted: boolean;
 };
-
-
 
 function getDateString(date: Date) {
   return date.toISOString().split("T")[0];
@@ -63,13 +70,9 @@ function shiftDate(dateStr: string, days: number) {
 }
 
 function getStatusClasses(status: "green" | "amber" | "red") {
-  if (status === "green") {
-    return "border-green-200 bg-green-50 text-green-700";
-  }
-  if (status === "amber") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-  return "border-red-200 bg-red-50 text-red-700";
+  if (status === "green") return styles.statusGreen;
+  if (status === "amber") return styles.statusAmber;
+  return styles.statusRed;
 }
 
 export default function TrainerDashboardPage() {
@@ -92,7 +95,7 @@ export default function TrainerDashboardPage() {
 
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
-        .select("id, full_name, email, calorie_target")
+        .select("id, full_name, email, calorie_target, daily_step_target")
         .order("full_name", { ascending: true });
 
       if (clientsError || !clientsData) {
@@ -106,6 +109,7 @@ export default function TrainerDashboardPage() {
 
       let setLogs: WorkoutSetLog[] = [];
       let mealLogs: MealLogRow[] = [];
+      let dailyTrackingData: DailyTracking[] = [];
 
       if (clientIds.length > 0) {
         const dayStart = `${selectedDate}T00:00:00`;
@@ -134,6 +138,17 @@ export default function TrainerDashboardPage() {
         if (mealLogData) {
           mealLogs = mealLogData as MealLogRow[];
         }
+
+        // Load daily tracking
+        const { data: trackingData } = await supabase
+          .from("daily_tracking")
+          .select("*")
+          .in("client_id", clientIds)
+          .eq("log_date", selectedDate);
+
+        if (trackingData) {
+          dailyTrackingData = trackingData as DailyTracking[];
+        }
       }
 
       const exerciseIds = Array.from(
@@ -153,9 +168,11 @@ export default function TrainerDashboardPage() {
       }
 
       const exerciseMap = new Map(programExercises.map((e) => [e.id, e]));
+      const trackingMap = new Map(dailyTrackingData.map((t) => [t.client_id, t]));
 
       const cards: ClientStatusCard[] = clients.map((client) => {
         const clientWorkoutLogs = setLogs.filter((log) => log.client_id === client.id);
+        const clientTracking = trackingMap.get(client.id);
 
         let workoutStatus: ClientStatusCard["workout"];
 
@@ -251,6 +268,8 @@ export default function TrainerDashboardPage() {
           client,
           workout: workoutStatus,
           nutrition: nutritionStatus,
+          steps: clientTracking?.steps_logged ?? null,
+          waterCompleted: clientTracking?.water_completed ?? false,
         };
       });
 
@@ -262,106 +281,113 @@ export default function TrainerDashboardPage() {
   }, [selectedDate]);
 
   return (
-    <main className={styles.page}>
-      <div className="mx-auto max-w-5xl rounded-2xl bg-white p-6 shadow">
-<PageHeader title="Trainer Dashboard" showTrainerNav />
-        <div className={`${styles.card} mb-6`}>
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-sm text-[#2B2B2B]">Viewing status for</p>
-              <p className="text-lg font-semibold text-[#111111]">{readableDate}</p>
-            </div>
+    <>
+      <h1 className={styles.display}>Trainer Dashboard</h1>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedDate((prev) => shiftDate(prev, -1))}
-                className={styles.buttonSecondary}
-              >
-                Previous Day
-              </button>
+      <div className={`${styles.card} mt-6 mb-6`}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-sm text-ink-muted">Viewing status for</p>
+            <p className="text-lg font-semibold text-ink">{readableDate}</p>
+          </div>
 
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className={styles.input}
-              />
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className={styles.input}
+            />
+            <button
+              type="button"
+              onClick={() => setSelectedDate((prev) => shiftDate(prev, -1))}
+              className={styles.buttonSecondary}
+            >
+              Previous Day
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(getDateString(new Date()))}
+              className={styles.buttonSecondary}
+            >
+              Today
+            </button>
 
-              <button
-                type="button"
-                onClick={() => setSelectedDate(getDateString(new Date()))}
-                className={styles.buttonSecondary}
-              >
-                Today
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedDate((prev) => shiftDate(prev, 1))}
-                className={styles.buttonSecondary}
-              >
-                Next Day
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDate((prev) => shiftDate(prev, 1))}
+              className={styles.buttonSecondary}
+            >
+              Next Day
+            </button>
           </div>
         </div>
+      </div>
 
-        {loading ? (
-          <p className={styles.body}>Loading dashboard...</p>
-        ) : clientCards.length === 0 ? (
-          <p className={styles.body}>No clients found.</p>
-        ) : (
-          <div className="space-y-4">
-            {clientCards.map((card) => (
-              <Link
-                key={card.client.id}
-                href={`/trainer/clients/${card.client.id}`}
-                className="block"
-              >
-                <div className={`${styles.card} hover:bg-[#F2F2F2] transition`}>
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <h2 className="text-lg font-semibold text-[#111111]">
-                        {card.client.full_name}
-                      </h2>
-                      <p className="mt-1 text-sm text-[#2B2B2B]">
-                        {card.client.email}
+      {loading ? (
+        <p className={styles.body}>Loading dashboard...</p>
+      ) : clientCards.length === 0 ? (
+        <p className={styles.body}>No clients found.</p>
+      ) : (
+        <div className="space-y-4">
+          {clientCards.map((card) => (
+            <Link
+              key={card.client.id}
+              href={`/trainer/clients/${card.client.id}`}
+              className="block"
+            >
+              <div className={`${styles.card} hover:bg-surface-sunken transition`}>
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-ink">
+                      {card.client.full_name}
+                    </h2>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      {card.client.email}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {/* Workout Card */}
+                    <div
+                      className={`rounded-xl px-4 py-3 ${getStatusClasses(
+                        card.workout.status
+                      )}`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
+                        Workout
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">
+                        {card.workout.label}
+                      </p>
+                      <p className="mt-1 text-xs opacity-70">
+                        Steps: {card.steps?.toLocaleString() ?? "0"} / {card.client.daily_step_target.toLocaleString()}
                       </p>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div
-                        className={`rounded-xl border px-4 py-3 ${getStatusClasses(
-                          card.workout.status
-                        )}`}
-                      >
-<p className="text-xs font-semibold uppercase tracking-wide opacity-70">                          Workout
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {card.workout.label}
-                        </p>
-                      </div>
-
-                      <div
-                        className={`rounded-xl border px-4 py-3 ${getStatusClasses(
-                          card.nutrition.status
-                        )}`}
-                      >
-<p className="text-xs font-semibold uppercase tracking-wide opacity-70">                          Nutrition
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {card.nutrition.label}
-                        </p>
-                      </div>
+                    {/* Nutrition Card */}
+                    <div
+                      className={`rounded-xl px-4 py-3 ${getStatusClasses(
+                        card.nutrition.status
+                      )}`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
+                        Nutrition
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">
+                        {card.nutrition.label}
+                      </p>
+                      <p className="mt-1 text-xs opacity-70">
+                        Water: {card.waterCompleted ? "Complete ✓" : "Not logged"}
+                      </p>
                     </div>
                   </div>
                 </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

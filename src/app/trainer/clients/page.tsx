@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 
@@ -35,36 +34,39 @@ export default function TrainerClientsPage() {
     loadClients();
   }, []);
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        {/* ✅ Header (handles logo, title, layout) */}
-<PageHeader title="Clients" showTrainerNav />
-        {/* ✅ Content */}
-        {loading ? (
-          <p className={styles.body}>Loading clients...</p>
-        ) : clients.length === 0 ? (
-          <p className={styles.body}>No clients found.</p>
-        ) : (
-          <div className="space-y-4">
-            {clients.map((client) => (
-              <Link
-                key={client.id}
-                href={`/trainer/clients/${client.id}`}
-                className="block"
-              >
-                <div className={`${styles.card} hover:bg-[#F2F2F2] transition`}>
-<h2 className={`text-lg font-semibold ${styles.goldText}`}>                    {client.full_name}
-                  </h2>
-                  <p className="mt-1 text-sm text-[#2B2B2B]">
-                    {client.email}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+return (
+    <>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className={styles.display}>Clients</h1>
+        <Link href="/trainer/clients/new" className={styles.buttonPrimary}>
+          Add Client
+        </Link>
       </div>
-    </main>
+
+      {loading ? (
+        <p className={styles.body}>Loading clients...</p>
+      ) : clients.length === 0 ? (
+        <p className={styles.body}>No clients found.</p>
+      ) : (
+        <div className="space-y-4">
+          {clients.map((client) => (
+            <Link
+              key={client.id}
+              href={`/trainer/clients/${client.id}`}
+              className="block"
+            >
+              <div className={`${styles.cardInteractive}`}>
+                <h2 className={`text-lg font-semibold ${styles.goldText}`}>
+                  {client.full_name}
+                </h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {client.email}
+                </p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

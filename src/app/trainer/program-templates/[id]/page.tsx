@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
+import Link from "next/link";
 
 type PageProps = {
   params: Promise<{
@@ -363,13 +363,13 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   };
 
   return (
-    <main className={styles.page}>
-      <div className="mx-auto max-w-6xl rounded-2xl bg-white p-6 shadow">
-        <PageHeader
-          title={template?.name || "Programme Template"}
-          backHref="/trainer/program-templates"
-          showTrainerNav
-        />
+<>
+      <div className="mb-6 flex items-center gap-4">
+        <Link href="/trainer/program-templates" className={styles.buttonSecondary}>
+          ← Back
+        </Link>
+        <h1 className={styles.display}>{template?.name || "Programme Template"}</h1>
+      </div>
 
         {loading ? (
           <p className={styles.body}>Loading template...</p>
@@ -382,7 +382,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
 
               <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
                 <div>
-                  <label className="text-sm font-medium text-[#111111]">
+                  <label className="text-sm font-medium text-ink">
                     Template name
                   </label>
                   <input
@@ -390,7 +390,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                     onChange={(e) => setTemplateName(e.target.value)}
                     className={styles.input}
                   />
-                  <p className="mt-2 text-sm text-[#2B2B2B]">
+                  <p className="mt-2 text-sm text-ink-muted">
                     {template.duration_weeks ?? "-"} weeks •{" "}
                     {template.days_per_week ?? "-"} days per week
                   </p>
@@ -409,7 +409,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
             <div className={styles.card}>
               <div className="flex flex-col gap-4 md:flex-row md:items-end">
                 <div className="flex-1">
-                  <label className="text-sm font-medium text-[#111111]">
+                  <label className="text-sm font-medium text-ink">
                     Add new day
                   </label>
                   <input
@@ -443,7 +443,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                   <div key={day.id} className={styles.card}>
                     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                       <div className="flex-1">
-                        <label className="text-sm font-medium text-[#111111]">
+                        <label className="text-sm font-medium text-ink">
                           Day name
                         </label>
                         <input
@@ -469,13 +469,13 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                     </div>
 
                     <div className="mt-6 rounded-xl border border-slate-200 p-4">
-                      <h3 className="text-sm font-semibold text-[#111111]">
+                      <h3 className="text-sm font-semibold text-ink">
                         Add Exercise
                       </h3>
 
                       <div className="mt-4 space-y-4">
                         <div>
-                          <label className="text-sm font-medium text-[#111111]">
+                          <label className="text-sm font-medium text-ink">
                             Search exercise
                           </label>
                           <input
@@ -495,12 +495,12 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                                 key={result.name}
                                 type="button"
                                 onClick={() => handleChooseExercise(day.id, result.name)}
-                                className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-[#F2F2F2]"
+                                className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-surface-sunken"
                               >
-                                <p className="font-medium text-[#111111]">
+                                <p className="font-medium text-ink">
                                   {result.name}
                                 </p>
-                                <p className="text-sm text-[#2B2B2B]">
+                                <p className="text-sm text-ink-muted">
                                   {result.target_muscle || "—"} •{" "}
                                   {result.primary_equipment || "—"} •{" "}
                                   {result.difficulty || "—"}
@@ -512,7 +512,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
 
                         <div className="grid gap-4 md:grid-cols-4">
                           <div>
-                            <label className="text-sm font-medium text-[#111111]">
+                            <label className="text-sm font-medium text-ink">
                               Selected exercise
                             </label>
                             <input
@@ -524,7 +524,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                           </div>
 
                           <div>
-                            <label className="text-sm font-medium text-[#111111]">
+                            <label className="text-sm font-medium text-ink">
                               Sets
                             </label>
                             <input
@@ -541,7 +541,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                           </div>
 
                           <div>
-                            <label className="text-sm font-medium text-[#111111]">
+                            <label className="text-sm font-medium text-ink">
                               Reps
                             </label>
                             <input
@@ -557,7 +557,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                           </div>
 
                           <div>
-                            <label className="text-sm font-medium text-[#111111]">
+                            <label className="text-sm font-medium text-ink">
                               Target weight (kg)
                             </label>
                             <input
@@ -587,7 +587,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                     </div>
 
                     <div className="mt-6">
-                      <h3 className="text-sm font-semibold text-[#111111]">
+                      <h3 className="text-sm font-semibold text-ink">
                         Exercises
                       </h3>
 
@@ -601,10 +601,10 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                               className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 md:flex-row md:items-center md:justify-between"
                             >
                               <div>
-                                <p className="font-medium text-[#111111]">
+                                <p className="font-medium text-ink">
                                   {exercise.exercise_name}
                                 </p>
-                                <p className="text-sm text-[#2B2B2B]">
+                                <p className="text-sm text-ink-muted">
                                   {exercise.sets ?? "-"} sets • {exercise.reps ?? "-"} reps
                                   {exercise.target_weight_kg !== null &&
                                   exercise.target_weight_kg !== undefined
@@ -632,7 +632,6 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
             )}
           </div>
         )}
-      </div>
-    </main>
+</>
   );
 }

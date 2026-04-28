@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Client = {
@@ -222,164 +221,164 @@ export default function ClientMealPlannerPage() {
     setRemovingMealId(null);
   };
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="Meal Planner" showClientNav />
-<div className="mb-6">
-  <Link
-    href="/client/shopping-list"
-    className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea] block`}
-  >
-    <p className="text-sm text-[#2B2B2B]">Shopping List</p>
-    <p className="mt-1 text-lg font-semibold text-[#111111]">
-      View collated ingredients from your meal plan
-    </p>
-    <p className="mt-2 text-sm text-[#2B2B2B]">
-      Generate a combined list from your planned meals
-    </p>
-  </Link>
-</div>
-        {loading ? (
-          <p className={styles.body}>Loading planner...</p>
-        ) : !client ? (
-          <p className={styles.body}>Client not found.</p>
-        ) : (
-          <div className="space-y-6">
-            <div className={`${styles.card} bg-[#F2F2F2]`}>
-              <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                <div>
-                  <h2 className={styles.subheading}>Planned Meals</h2>
-                  <p className="mt-1 text-sm text-[#2B2B2B]">
-                    Total planned calories: {plannedCalories} kcal
-                  </p>
-                </div>
+return (
+    <>
+      <h1 className={styles.display}>Meal Planner</h1>
 
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Planned date
-                  </label>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className={styles.input}
-                  />
-                </div>
+      <div className="mt-6 mb-6">
+        <Link
+          href="/client/shopping-list"
+          className={`${styles.cardInteractive} bg-surface-sunken block`}
+        >
+          <p className="text-sm text-ink-muted">Shopping List</p>
+          <p className="mt-1 text-lg font-semibold text-ink">
+            View collated ingredients from your meal plan
+          </p>
+          <p className="mt-2 text-sm text-ink-muted">
+            Generate a combined list from your planned meals
+          </p>
+        </Link>
+      </div>
+
+      {loading ? (
+        <p className={styles.body}>Loading planner...</p>
+      ) : !client ? (
+        <p className={styles.body}>Client not found.</p>
+      ) : (
+        <div className="space-y-6">
+          <div className={`${styles.card} bg-surface-sunken`}>
+            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <h2 className={styles.h2}>Planned Meals</h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Total planned calories: {plannedCalories} kcal
+                </p>
               </div>
-            </div>
 
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Add Planned Meal</h2>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Choose recipe
-                  </label>
-                  <select
-                    value={selectedRecipeId}
-                    onChange={(e) => setSelectedRecipeId(e.target.value)}
-                    className={styles.input}
-                  >
-                    <option value="">Select a recipe</option>
-                    {recipes.map((recipe) => (
-                      <option key={recipe.id} value={recipe.id}>
-                        {recipe.name}
-                        {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  onClick={handleAddMeal}
-                  disabled={addingMeal}
-                  className={styles.buttonPrimary}
-                >
-                  {addingMeal ? "Adding..." : "Add to Plan"}
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Meals Planned For {selectedDate}</h2>
-
-              <div className="mt-4 space-y-2">
-                {plannedMeals.length === 0 ? (
-                  <p className={styles.body}>No meals planned for this date yet.</p>
-                ) : (
-                  plannedMeals.map((meal) => {
-                    const quantity = meal.quantity ?? 1;
-                    const caloriesPerMeal = meal.recipes?.calories ?? 0;
-                    const totalMealCalories = caloriesPerMeal * quantity;
-
-                    return (
-                      <div
-                        key={meal.id}
-                        className="flex flex-col gap-3 rounded-lg border border-slate-200 px-3 py-3 md:flex-row md:items-center md:justify-between"
-                      >
-                        <div>
-                          <p className="font-medium text-[#111111]">
-                            {meal.recipes?.name || "Unnamed meal"}
-                          </p>
-                          <p className="text-sm text-[#2B2B2B]">
-                            {caloriesPerMeal} kcal each
-                          </p>
-                          {meal.recipes?.description && (
-                            <p className="text-sm text-[#2B2B2B]">
-                              {meal.recipes.description}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleQuantityChange(meal.id, Math.max(1, quantity - 1))
-                            }
-                            disabled={updatingMealId === meal.id || quantity <= 1}
-                            className={styles.buttonSecondary}
-                          >
-                            -
-                          </button>
-
-                          <span className="min-w-[90px] text-center text-sm font-medium text-[#111111]">
-                            Qty: {quantity}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => handleQuantityChange(meal.id, quantity + 1)}
-                            disabled={updatingMealId === meal.id}
-                            className={styles.buttonSecondary}
-                          >
-                            +
-                          </button>
-
-                          <span className="min-w-[100px] text-right text-sm font-medium text-[#111111]">
-                            {totalMealCalories} kcal
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMeal(meal.id)}
-                            disabled={removingMealId === meal.id}
-                            className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Planned date
+                </label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className={styles.input}
+                />
               </div>
             </div>
           </div>
-        )}
-      </div>
-    </main>
+
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Add Planned Meal</h2>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Choose recipe
+                </label>
+                <select
+                  value={selectedRecipeId}
+                  onChange={(e) => setSelectedRecipeId(e.target.value)}
+                  className={styles.input}
+                >
+                  <option value="">Select a recipe</option>
+                  {recipes.map((recipe) => (
+                    <option key={recipe.id} value={recipe.id}>
+                      {recipe.name}
+                      {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={handleAddMeal}
+                disabled={addingMeal}
+                className={styles.buttonPrimaryNutrition}
+              >
+                {addingMeal ? "Adding..." : "Add to Plan"}
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Meals Planned For {selectedDate}</h2>
+
+            <div className="mt-4 space-y-2">
+              {plannedMeals.length === 0 ? (
+                <p className={styles.body}>No meals planned for this date yet.</p>
+              ) : (
+                plannedMeals.map((meal) => {
+                  const quantity = meal.quantity ?? 1;
+                  const caloriesPerMeal = meal.recipes?.calories ?? 0;
+                  const totalMealCalories = caloriesPerMeal * quantity;
+
+                  return (
+                    <div
+                      key={meal.id}
+                      className="flex flex-col gap-3 rounded-lg border border-border-subtle px-3 py-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div>
+                        <p className="font-medium text-ink">
+                          {meal.recipes?.name || "Unnamed meal"}
+                        </p>
+                        <p className="text-sm text-ink-muted">
+                          {caloriesPerMeal} kcal each
+                        </p>
+                        {meal.recipes?.description && (
+                          <p className="text-sm text-ink-muted">
+                            {meal.recipes.description}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleQuantityChange(meal.id, Math.max(1, quantity - 1))
+                          }
+                          disabled={updatingMealId === meal.id || quantity <= 1}
+                          className={styles.buttonSecondary}
+                        >
+                          -
+                        </button>
+
+                        <span className="min-w-[90px] text-center text-sm font-medium text-ink">
+                          Qty: {quantity}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleQuantityChange(meal.id, quantity + 1)}
+                          disabled={updatingMealId === meal.id}
+                          className={styles.buttonSecondary}
+                        >
+                          +
+                        </button>
+
+                        <span className="min-w-[100px] text-right text-sm font-medium text-ink">
+                          {totalMealCalories} kcal
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMeal(meal.id)}
+                          disabled={removingMealId === meal.id}
+                          className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

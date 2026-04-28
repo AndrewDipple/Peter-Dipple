@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
+
 
 type Recipe = {
   id: string;
@@ -180,100 +180,98 @@ export default function ClientRecipeDetailPage({ params }: PageProps) {
       ? recipe.calories * Math.max(1, Number(quantity))
       : recipe?.calories ?? 0;
 
-  return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-3xl rounded-2xl bg-white p-6 shadow">
-        <div className="flex items-center justify-between">
-<PageHeader title="Nutrition" backHref="/client/dashboard" />
+return (
+    <>
+      <div className="mb-6 flex items-center gap-4">
+        <Link href="/client/nutrition" className={styles.buttonSecondary}>
+          ← Back
+        </Link>
+        <h1 className={styles.display}>Nutrition</h1>
+      </div>
 
-        </div>
+      {loading ? (
+        <p className={styles.body}>Loading meal...</p>
+      ) : !recipe ? (
+        <p className={styles.body}>Meal not found.</p>
+      ) : (
+        <div className="space-y-6">
+          {recipe.image_url && (
+            <img
+              src={recipe.image_url}
+              alt={recipe.name}
+              className="w-full rounded-xl border border-border-subtle object-cover"
+            />
+          )}
 
-        {loading ? (
-          <p className="mt-6 text-slate-800">Loading meal...</p>
-        ) : !recipe ? (
-          <p className="mt-6 text-slate-800">Meal not found.</p>
-        ) : (
-          <div className="mt-6 space-y-4">
-            {recipe.image_url && (
-              <img
-                src={recipe.image_url}
-                alt={recipe.name}
-                className="w-full rounded-xl border border-slate-200 object-cover"
-              />
-            )}
+          <div>
+            <h2 className={styles.h2}>{recipe.name}</h2>
+            <p className="mt-1 text-ink-muted">
+              {recipe.description || "No description"}
+            </p>
+            <p className="mt-2 text-ink">
+              Calories per portion: {recipe.calories ?? "-"}
+            </p>
+          </div>
 
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">
-                {recipe.name}
-              </h2>
-              <p className="mt-1 text-slate-800">
-                {recipe.description || "No description"}
-              </p>
-              <p className="mt-2 text-slate-900">
-                Calories per portion: {recipe.calories ?? "-"}
-              </p>
-            </div>
+          <div className={styles.card}>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex-1">
+                <h3 className="font-semibold text-ink">Today's Meal Log</h3>
+                <p className="text-sm text-ink-muted">{today}</p>
 
-            <div className="rounded-xl border border-slate-200 p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-slate-900">Today's Meal Log</h3>
-                  <p className="text-sm text-slate-800">{today}</p>
-
-                  <div className="mt-3">
-                    <label className="text-sm font-medium">Quantity eaten</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 sm:max-w-[160px]"
-                    />
-                  </div>
-
-                  <p className="mt-3 text-sm text-slate-900">
-                    Total calories: <strong>{totalCalories} kcal</strong>
-                  </p>
+                <div className="mt-3">
+                  <label className="text-sm font-medium text-ink">Quantity eaten</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-border-subtle px-3 py-2 sm:max-w-[160px]"
+                  />
                 </div>
 
-                <div className="flex gap-2">
+                <p className="mt-3 text-sm text-ink">
+                  Total calories: <strong>{totalCalories} kcal</strong>
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveMeal}
+                  disabled={saving}
+                  className={styles.buttonPrimaryNutrition}
+                >
+                  {saving ? "Saving..." : "Save Meal"}
+                </button>
+
+                {mealLog?.completed && (
                   <button
-                    onClick={handleSaveMeal}
+                    onClick={handleClearMeal}
                     disabled={saving}
-                    className="rounded-xl bg-black px-4 py-2 text-white"
+                    className={styles.buttonSecondary}
                   >
-                    {saving ? "Saving..." : "Save Meal"}
+                    Remove
                   </button>
-
-                  {mealLog?.completed && (
-                    <button
-                      onClick={handleClearMeal}
-                      disabled={saving}
-                      className="rounded-xl border border-slate-300 px-4 py-2"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
             </div>
-
-            <div>
-              <h3 className="font-semibold text-slate-900">Ingredients</h3>
-              <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm text-slate-900">
-                {recipe.ingredients || "No ingredients"}
-              </pre>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-slate-900">Instructions</h3>
-              <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm text-slate-900">
-                {recipe.instructions || "No instructions"}
-              </pre>
-            </div>
           </div>
-        )}
-      </div>
-    </main>
+
+          <div>
+            <h3 className="font-semibold text-ink">Ingredients</h3>
+            <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-surface-sunken p-4 text-sm text-ink">
+              {recipe.ingredients || "No ingredients"}
+            </pre>
+          </div>
+
+          <div>
+            <h3 className="font-semibold text-ink">Instructions</h3>
+            <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-surface-sunken p-4 text-sm text-ink">
+              {recipe.instructions || "No instructions"}
+            </pre>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

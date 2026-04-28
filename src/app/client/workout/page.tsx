@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Client = {
@@ -59,6 +58,7 @@ export default function ClientWorkoutPage() {
   const [selectedDayId, setSelectedDayId] = useState("");
   const [currentDay, setCurrentDay] = useState<ClientProgramDay | null>(null);
   const [dayExercises, setDayExercises] = useState<ClientProgramDayExercise[]>([]);
+  const [activeExerciseId, setActiveExerciseId] = useState("");
   const [setLogs, setSetLogs] = useState<ClientProgramSetLog[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValues>>({});
   const [previousWeights, setPreviousWeights] = useState<PreviousWeightMap>({});
@@ -169,7 +169,7 @@ export default function ClientWorkoutPage() {
       }
 
       setDayExercises(exerciseData);
-
+      setActiveExerciseId(exerciseData[0]?.id ?? "");
       const exerciseIds = exerciseData.map((e) => e.id);
 
       if (exerciseIds.length > 0) {
@@ -311,6 +311,10 @@ export default function ClientWorkoutPage() {
     totalExercises > 0
       ? Math.round((completedExerciseCount / totalExercises) * 100)
       : 0;
+const activeExercise =
+  dayExercises.find((exercise) => exercise.id === activeExerciseId) ??
+  dayExercises[0] ??
+  null;
 
   const upsertSetLog = async ({
     clientId,
@@ -507,191 +511,215 @@ export default function ClientWorkoutPage() {
     alert("Workout day completed!");
   };
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="Workout" showClientNav />
+return (
+    <>
+      <h1 className={styles.display}>Workout</h1>
 
-        {loading ? (
-          <p className={styles.body}>Loading workout...</p>
-        ) : !client ? (
-          <p className={styles.body}>{debugMessage || "Client not found."}</p>
-        ) : !clientProgram || !currentDay ? (
-          <p className={styles.body}>
-            {debugMessage || "No active programme day available yet."}
-          </p>
-        ) : (
-          <>
-            <div className={styles.card}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <h2 className={styles.subheading}>
-                    {currentDay.day_name || "Workout Day"}
-                  </h2>
-                  <p className="mt-1 text-sm text-[#2B2B2B]">
-                    Current selected day
+      {loading ? (
+        <p className={styles.body}>Loading workout...</p>
+      ) : !client ? (
+        <p className={styles.body}>{debugMessage || "Client not found."}</p>
+      ) : !clientProgram || !currentDay ? (
+        <p className={styles.body}>
+          {debugMessage || "No active programme day available yet."}
+        </p>
+      ) : (
+        <div className="mt-6 space-y-6">
+          <div className={styles.card}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <h2 className={styles.h2}>
+                  {currentDay.day_name || "Workout Day"}
+                </h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Current selected day
+                </p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Change workout day
+                </label>
+                <select
+                  value={selectedDayId}
+                  onChange={(e) => setSelectedDayId(e.target.value)}
+                  className={styles.input}
+                >
+                  {programDays.map((day) => (
+                    <option key={day.id} value={day.id}>
+                      {day.day_name || "Workout Day"}
+                      {day.completed ? " ✓" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-sm text-ink">
+                {completedExerciseCount} of {totalExercises} exercises complete
+              </span>
+              <span className="text-sm text-ink-muted">
+                {completionPercentage}% completed
+              </span>
+            </div>
+
+            <div className="mt-3">
+              <div className="h-3 w-full rounded-full bg-surface-sunken">
+                <div
+                  className="styles.primarybutton.Workout"
+                  style={{ width: `${completionPercentage}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+<div className="space-y-4">
+  {dayExercises.length > 0 && activeExercise ? (
+    <>
+      <div className="flex gap-2 overflow-x-auto rounded-2xl bg-surface-sunken p-2">
+        {dayExercises.map((exercise, index) => {
+          const isActive = exercise.id === activeExercise.id;
+
+          return (
+            <button
+              key={exercise.id}
+              type="button"
+              onClick={() => setActiveExerciseId(exercise.id)}
+className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-xl transition ${
+  isActive
+    ? styles.buttonPrimaryWorkout
+    : "bg-white text-ink border border-slate-200 hover:bg-surface"
+}`}
+            >
+              {exercise.exercise_name || `Exercise ${index + 1}`}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={styles.card}>
+        <p className="font-semibold text-ink">
+          {activeExercise.exercise_name}
+        </p>
+
+        <p className="text-sm text-ink-muted">
+          Target: {activeExercise.sets ?? "-"} sets × {activeExercise.reps ?? "-"} reps
+          {activeExercise.target_weight_kg !== null
+            ? ` × ${activeExercise.target_weight_kg}kg`
+            : ""}
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {(activeExercise.sets && activeExercise.sets > 0
+            ? Array.from({ length: activeExercise.sets }, (_, i) => i + 1)
+            : [1]
+          ).map((setNumber) => {
+            const setLog = getSetLog(activeExercise.id, setNumber);
+            const currentKey = getDraftKey(activeExercise.id, setNumber);
+
+            const rememberedWeight =
+              activeExercise.exercise_name &&
+              previousWeights[activeExercise.exercise_name] !== null &&
+              previousWeights[activeExercise.exercise_name] !== undefined
+                ? previousWeights[activeExercise.exercise_name]
+                : null;
+
+            return (
+              <div
+                key={setNumber}
+                className="grid gap-3 rounded-xl bg-surface-sunken p-3 md:grid-cols-12"
+              >
+                <div className="md:col-span-2 flex items-center">
+                  <p className="text-sm font-medium text-ink">
+                    Set {setNumber}
                   </p>
                 </div>
 
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Change workout day
+                <div className="md:col-span-4">
+                  <label className="text-sm font-medium text-ink">
+                    Weight (kg)
                   </label>
-                  <select
-                    value={selectedDayId}
-                    onChange={(e) => setSelectedDayId(e.target.value)}
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={getDisplayWeight(activeExercise, setNumber)}
+                    onChange={(e) =>
+                      handleWeightChange(
+                        activeExercise.id,
+                        setNumber,
+                        e.target.value
+                      )
+                    }
+                    onBlur={() => handleWeightBlur(activeExercise, setNumber)}
                     className={styles.input}
-                  >
-                    {programDays.map((day) => (
-                      <option key={day.id} value={day.id}>
-                        {day.day_name || "Workout Day"}
-                        {day.completed ? " ✓" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Weight"
+                  />
+                  {rememberedWeight !== null && (
+                    <p className="mt-1 text-xs text-ink-muted">
+                      Previous weight: {rememberedWeight} kg
+                    </p>
+                  )}
                 </div>
-              </div>
 
-              <div className="mt-4 flex items-center justify-between">
-                <span className="text-sm text-[#111111]">
-                  {completedExerciseCount} of {totalExercises} exercises complete
-                </span>
-                <span className="text-sm text-[#2B2B2B]">
-                  {completionPercentage}% completed
-                </span>
-              </div>
-
-              <div className="mt-3">
-                <div className="h-3 w-full rounded-full bg-[#F2F2F2]">
-                  <div
-                    className="h-3 rounded-full bg-[#1F6F5E] transition-all"
-                    style={{ width: `${completionPercentage}%` }}
+                <div className="md:col-span-4">
+                  <label className="text-sm font-medium text-ink">
+                    Reps completed
+                  </label>
+                  <input
+                    type="number"
+                    value={getDisplayReps(activeExercise, setNumber)}
+                    onChange={(e) =>
+                      handleRepsChange(
+                        activeExercise.id,
+                        setNumber,
+                        e.target.value
+                      )
+                    }
+                    onBlur={() => handleRepsBlur(activeExercise, setNumber)}
+                    className={styles.input}
+                    placeholder="Reps"
                   />
                 </div>
+
+                <div className="md:col-span-2 flex items-end justify-end">
+                  <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-ink">
+                    Completed
+                    <input
+                      type="checkbox"
+                      checked={setLog?.completed ?? false}
+                      onChange={(e) =>
+                        handleToggleSet(
+                          activeExercise,
+                          setNumber,
+                          e.target.checked
+                        )
+                      }
+                      disabled={savingKey === currentKey}
+                    />
+                  </label>
+                </div>
               </div>
-            </div>
-
-            <div className="mt-6 space-y-4">
-              {dayExercises.length > 0 ? (
-                dayExercises.map((exercise) => {
-                  const targetSets = exercise.sets ?? 0;
-                  const setNumbers =
-                    targetSets > 0
-                      ? Array.from({ length: targetSets }, (_, i) => i + 1)
-                      : [1];
-
-                  const rememberedWeight =
-                    exercise.exercise_name &&
-                    previousWeights[exercise.exercise_name] !== null &&
-                    previousWeights[exercise.exercise_name] !== undefined
-                      ? previousWeights[exercise.exercise_name]
-                      : null;
-
-                  return (
-                    <div key={exercise.id} className={styles.card}>
-                      <p className="font-semibold text-[#111111]">
-                        {exercise.exercise_name}
-                      </p>
-                      <p className="text-sm text-[#2B2B2B]">
-                        Target: {exercise.sets ?? "-"} sets × {exercise.reps ?? "-"} reps
-                        {exercise.target_weight_kg !== null
-                          ? ` × ${exercise.target_weight_kg}kg`
-                          : ""}
-                      </p>
-
-                      <div className="mt-4 space-y-3">
-                        {setNumbers.map((setNumber) => {
-                          const setLog = getSetLog(exercise.id, setNumber);
-                          const currentKey = getDraftKey(exercise.id, setNumber);
-
-                          return (
-                            <div
-                              key={setNumber}
-                              className="grid gap-3 rounded-xl bg-[#F2F2F2] p-3 md:grid-cols-12"
-                            >
-                              <div className="md:col-span-2 flex items-center">
-                                <label className="flex items-center gap-2 text-sm font-medium text-[#111111]">
-                                  <input
-                                    type="checkbox"
-                                    checked={setLog?.completed ?? false}
-                                    onChange={(e) =>
-                                      handleToggleSet(exercise, setNumber, e.target.checked)
-                                    }
-                                    disabled={savingKey === currentKey}
-                                  />
-                                  Set {setNumber}
-                                </label>
-                              </div>
-
-                              <div className="md:col-span-5">
-                                <label className="text-sm font-medium text-[#111111]">
-                                  Weight (kg)
-                                </label>
-                                <input
-                                  type="number"
-                                  step="0.5"
-                                  value={getDisplayWeight(exercise, setNumber)}
-                                  onChange={(e) =>
-                                    handleWeightChange(
-                                      exercise.id,
-                                      setNumber,
-                                      e.target.value
-                                    )
-                                  }
-                                  onBlur={() => handleWeightBlur(exercise, setNumber)}
-                                  className={styles.input}
-                                  placeholder="Weight"
-                                />
-                                {rememberedWeight !== null && (
-                                  <p className="mt-1 text-xs text-[#2B2B2B]">
-                                    Previous weight: {rememberedWeight} kg
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="md:col-span-5">
-                                <label className="text-sm font-medium text-[#111111]">
-                                  Reps completed
-                                </label>
-                                <input
-                                  type="number"
-                                  value={getDisplayReps(exercise, setNumber)}
-                                  onChange={(e) =>
-                                    handleRepsChange(
-                                      exercise.id,
-                                      setNumber,
-                                      e.target.value
-                                    )
-                                  }
-                                  onBlur={() => handleRepsBlur(exercise, setNumber)}
-                                  className={styles.input}
-                                  placeholder="Reps"
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className={styles.body}>
-                  {debugMessage || "No exercises assigned for this day yet."}
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={handleCompleteDay}
-              disabled={completingDay}
-              className={`${styles.buttonAccent} mt-6 w-full py-3 disabled:opacity-50`}
-            >
-              {completingDay ? "Completing..." : "Complete Workout Day"}
-            </button>
-          </>
-        )}
+            );
+          })}
+        </div>
       </div>
-    </main>
+    </>
+  ) : (
+    <p className={styles.body}>
+      {debugMessage || "No exercises assigned for this day yet."}
+    </p>
+  )}
+</div>
+
+          <button
+            onClick={handleCompleteDay}
+            disabled={completingDay}
+            className={`${styles.buttonPrimaryWorkout} w-full py-3 disabled:opacity-50`}          >
+            {completingDay ? "Completing..." : "Complete Workout Day"}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

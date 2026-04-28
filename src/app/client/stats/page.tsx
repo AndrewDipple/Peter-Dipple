@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 import {
   LineChart,
@@ -286,300 +285,298 @@ useEffect(() => {
     await loadStats();
   };
 
-  return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader title="My Stats" showClientNav />
+return (
+    <>
+      <h1 className={styles.display}>My Stats</h1>
 
-        {loading ? (
-          <p className={styles.body}>Loading stats...</p>
-        ) : !client ? (
-          <p className={styles.body}>Client not found.</p>
-        ) : (
-          <div className="space-y-6">
-            <div className={styles.card}>
-              <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                <div>
-                  <h2 className={styles.subheading}>Body Weight</h2>
-                  <p className="mt-1 text-sm text-[#2B2B2B]">
-                    Latest:{" "}
-                    {latestWeight
-                      ? `${latestWeight.weight_kg} kg`
-                      : "No weight logged yet"}
+      {loading ? (
+        <p className={styles.body}>Loading stats...</p>
+      ) : !client ? (
+        <p className={styles.body}>Client not found.</p>
+      ) : (
+        <div className="mt-6 space-y-6">
+          <div className={styles.card}>
+            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <h2 className={styles.h2}>Body Weight</h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Latest:{" "}
+                  {latestWeight
+                    ? `${latestWeight.weight_kg} kg`
+                    : "No weight logged yet"}
+                </p>
+                {latestWeight && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Logged on {latestWeight.log_date}
                   </p>
-                  {latestWeight && (
-                    <p className="mt-1 text-xs text-[#2B2B2B]">
-                      Logged on {latestWeight.log_date}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={weightInput}
-                    onChange={(e) => setWeightInput(e.target.value)}
-                    className={styles.input}
-                    placeholder="Weight (kg)"
-                  />
-                  <button
-                    onClick={handleSaveWeight}
-                    disabled={savingWeight}
-                    className={styles.buttonPrimary}
-                  >
-                    {savingWeight ? "Saving..." : "Log Weight"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <h3 className="mb-3 text-sm font-medium text-[#111111]">
-                  Weight Progress
-                </h3>
-
-                {weightChartData.length < 2 ? (
-                  <p className={styles.body}>Log at least two weights to see a graph.</p>
-                ) : (
-<div className="w-full min-w-0">
-  <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={weightChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="weight" strokeWidth={2} dot />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
                 )}
               </div>
 
-              <div className="mt-4 space-y-2">
-                {weightLogs.length === 0 ? (
-                  <p className={styles.body}>No weight history yet.</p>
-                ) : (
-                  weightLogs.slice(0, 10).map((log) => (
-                    <div
-                      key={log.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <span className="text-sm text-[#2B2B2B]">{log.log_date}</span>
-                      <span className="font-medium text-[#111111]">
-                        {log.weight_kg} kg
-                      </span>
-                    </div>
-                  ))
-                )}
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  step="0.1"
+                  value={weightInput}
+                  onChange={(e) => setWeightInput(e.target.value)}
+                  className={styles.input}
+                  placeholder="Weight (kg)"
+                />
+                <button
+                  onClick={handleSaveWeight}
+                  disabled={savingWeight}
+                  className={styles.buttonPrimaryStats}
+                >
+                  {savingWeight ? "Saving..." : "Log Weight"}
+                </button>
               </div>
             </div>
 
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Body Measurements</h2>
+            <div className="mt-6">
+              <h3 className="mb-3 text-sm font-medium text-ink">
+                Weight Progress
+              </h3>
 
-              <p className="mt-1 text-sm text-[#2B2B2B]">
-                Latest waist:{" "}
-                {latestMeasurements?.waist_cm !== null &&
-                latestMeasurements?.waist_cm !== undefined
-                  ? `${latestMeasurements.waist_cm} cm`
-                  : "No measurements logged yet"}
-              </p>
-              {latestMeasurements && (
-                <p className="mt-1 text-xs text-[#2B2B2B]">
-                  Logged on {latestMeasurements.log_date}
-                </p>
+              {weightChartData.length < 2 ? (
+                <p className={styles.body}>Log at least two weights to see a graph.</p>
+              ) : (
+                <div className="w-full min-w-0">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <LineChart data={weightChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="weight" strokeWidth={2} dot />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               )}
+            </div>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="mt-4 space-y-2">
+              {weightLogs.length === 0 ? (
+                <p className={styles.body}>No weight history yet.</p>
+              ) : (
+                weightLogs.slice(0, 10).map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2"
+                  >
+                    <span className="text-sm text-ink-muted">{log.log_date}</span>
+                    <span className="font-medium text-ink">
+                      {log.weight_kg} kg
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Body Measurements</h2>
+
+            <p className="mt-1 text-sm text-ink-muted">
+              Latest waist:{" "}
+              {latestMeasurements?.waist_cm !== null &&
+              latestMeasurements?.waist_cm !== undefined
+                ? `${latestMeasurements.waist_cm} cm`
+                : "No measurements logged yet"}
+            </p>
+            {latestMeasurements && (
+              <p className="mt-1 text-xs text-ink-muted">
+                Logged on {latestMeasurements.log_date}
+              </p>
+            )}
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <input
+                type="number"
+                step="0.1"
+                value={waistInput}
+                onChange={(e) => setWaistInput(e.target.value)}
+                className={styles.input}
+                placeholder="Waist (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={hipsInput}
+                onChange={(e) => setHipsInput(e.target.value)}
+                className={styles.input}
+                placeholder="Hips (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={chestInput}
+                onChange={(e) => setChestInput(e.target.value)}
+                className={styles.input}
+                placeholder="Chest (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={leftArmInput}
+                onChange={(e) => setLeftArmInput(e.target.value)}
+                className={styles.input}
+                placeholder="Left arm (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={rightArmInput}
+                onChange={(e) => setRightArmInput(e.target.value)}
+                className={styles.input}
+                placeholder="Right arm (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={leftThighInput}
+                onChange={(e) => setLeftThighInput(e.target.value)}
+                className={styles.input}
+                placeholder="Left thigh (cm)"
+              />
+              <input
+                type="number"
+                step="0.1"
+                value={rightThighInput}
+                onChange={(e) => setRightThighInput(e.target.value)}
+                className={styles.input}
+                placeholder="Right thigh (cm)"
+              />
+              <input
+                type="text"
+                value={measurementNote}
+                onChange={(e) => setMeasurementNote(e.target.value)}
+                className={styles.input}
+                placeholder="Optional note"
+              />
+            </div>
+
+            <button
+              onClick={handleSaveMeasurements}
+              disabled={savingMeasurements}
+              className={`${styles.buttonPrimaryStats} mt-4`}
+            >
+              {savingMeasurements ? "Saving..." : "Log Measurements"}
+            </button>
+
+            <div className="mt-6">
+              <h3 className="mb-3 text-sm font-medium text-ink">
+                Waist Progress
+              </h3>
+
+              {waistChartData.length < 2 ? (
+                <p className={styles.body}>
+                  Log at least two waist measurements to see a graph.
+                </p>
+              ) : (
+                <div className="w-full min-w-0">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <LineChart data={waistChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="waist" strokeWidth={2} dot />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {measurementLogs.length === 0 ? (
+                <p className={styles.body}>No measurement history yet.</p>
+              ) : (
+                measurementLogs.slice(0, 10).map((log) => (
+                  <div
+                    key={log.id}
+                    className="rounded-lg border border-border-subtle px-3 py-2"
+                  >
+                    <p className="text-sm font-medium text-ink">
+                      {log.log_date}
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      Waist: {log.waist_cm ?? "-"} cm • Hips: {log.hips_cm ?? "-"} cm •
+                      Chest: {log.chest_cm ?? "-"} cm
+                    </p>
+                    <p className="text-sm text-ink-muted">
+                      Arms: {log.left_arm_cm ?? "-"} / {log.right_arm_cm ?? "-"} cm •
+                      Thighs: {log.left_thigh_cm ?? "-"} / {log.right_thigh_cm ?? "-"} cm
+                    </p>
+                    {log.note && (
+                      <p className="text-sm text-ink-muted">{log.note}</p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Progress Photos</h2>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Upload photo
+                </label>
                 <input
-                  type="number"
-                  step="0.1"
-                  value={waistInput}
-                  onChange={(e) => setWaistInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Waist (cm)"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                  className={`${styles.input} pt-2`}
                 />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={hipsInput}
-                  onChange={(e) => setHipsInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Hips (cm)"
-                />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={chestInput}
-                  onChange={(e) => setChestInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Chest (cm)"
-                />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={leftArmInput}
-                  onChange={(e) => setLeftArmInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Left arm (cm)"
-                />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={rightArmInput}
-                  onChange={(e) => setRightArmInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Right arm (cm)"
-                />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={leftThighInput}
-                  onChange={(e) => setLeftThighInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Left thigh (cm)"
-                />
-                <input
-                  type="number"
-                  step="0.1"
-                  value={rightThighInput}
-                  onChange={(e) => setRightThighInput(e.target.value)}
-                  className={styles.input}
-                  placeholder="Right thigh (cm)"
-                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">Note</label>
                 <input
                   type="text"
-                  value={measurementNote}
-                  onChange={(e) => setMeasurementNote(e.target.value)}
+                  value={photoNote}
+                  onChange={(e) => setPhotoNote(e.target.value)}
                   className={styles.input}
                   placeholder="Optional note"
                 />
               </div>
 
               <button
-                onClick={handleSaveMeasurements}
-                disabled={savingMeasurements}
-                className={`${styles.buttonPrimary} mt-4`}
+                onClick={handleUploadPhoto}
+                disabled={uploadingPhoto || !photoFile}
+                className={styles.buttonPrimaryStats}
               >
-                {savingMeasurements ? "Saving..." : "Log Measurements"}
+                {uploadingPhoto ? "Uploading..." : "Upload"}
               </button>
-
-              <div className="mt-6">
-                <h3 className="mb-3 text-sm font-medium text-[#111111]">
-                  Waist Progress
-                </h3>
-
-                {waistChartData.length < 2 ? (
-                  <p className={styles.body}>
-                    Log at least two waist measurements to see a graph.
-                  </p>
-                ) : (
-<div className="w-full min-w-0">
-  <ResponsiveContainer width="100%" height={250}>
-                      <LineChart data={waistChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis domain={["dataMin - 1", "dataMax + 1"]} />
-                        <Tooltip />
-                        <Line type="monotone" dataKey="waist" strokeWidth={2} dot />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 space-y-2">
-                {measurementLogs.length === 0 ? (
-                  <p className={styles.body}>No measurement history yet.</p>
-                ) : (
-                  measurementLogs.slice(0, 10).map((log) => (
-                    <div
-                      key={log.id}
-                      className="rounded-lg border border-slate-200 px-3 py-2"
-                    >
-                      <p className="text-sm font-medium text-[#111111]">
-                        {log.log_date}
-                      </p>
-                      <p className="text-sm text-[#2B2B2B]">
-                        Waist: {log.waist_cm ?? "-"} cm • Hips: {log.hips_cm ?? "-"} cm •
-                        Chest: {log.chest_cm ?? "-"} cm
-                      </p>
-                      <p className="text-sm text-[#2B2B2B]">
-                        Arms: {log.left_arm_cm ?? "-"} / {log.right_arm_cm ?? "-"} cm •
-                        Thighs: {log.left_thigh_cm ?? "-"} / {log.right_thigh_cm ?? "-"} cm
-                      </p>
-                      {log.note && (
-                        <p className="text-sm text-[#2B2B2B]">{log.note}</p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
             </div>
 
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Progress Photos</h2>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Upload photo
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                    className={`${styles.input} pt-2`}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">Note</label>
-                  <input
-                    type="text"
-                    value={photoNote}
-                    onChange={(e) => setPhotoNote(e.target.value)}
-                    className={styles.input}
-                    placeholder="Optional note"
-                  />
-                </div>
-
-                <button
-                  onClick={handleUploadPhoto}
-                  disabled={uploadingPhoto || !photoFile}
-                  className={styles.buttonPrimary}
-                >
-                  {uploadingPhoto ? "Uploading..." : "Upload"}
-                </button>
-              </div>
-
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {photos.length === 0 ? (
-                  <p className={styles.body}>No progress photos yet.</p>
-                ) : (
-                  photos.map((photo) => (
-                    <div key={photo.id} className={`${styles.card} p-3`}>
-                      <img
-                        src={photo.image_url}
-                        alt="Progress"
-                        className="h-56 w-full rounded-xl object-cover"
-                      />
-                      <p className="mt-2 text-sm font-medium text-[#111111]">
-                        {photo.log_date}
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {photos.length === 0 ? (
+                <p className={styles.body}>No progress photos yet.</p>
+              ) : (
+                photos.map((photo) => (
+                  <div key={photo.id} className={`${styles.card} p-3`}>
+                    <img
+                      src={photo.image_url}
+                      alt="Progress"
+                      className="h-56 w-full rounded-xl object-cover"
+                    />
+                    <p className="mt-2 text-sm font-medium text-ink">
+                      {photo.log_date}
+                    </p>
+                    {photo.note && (
+                      <p className="mt-1 text-sm text-ink-muted">
+                        {photo.note}
                       </p>
-                      {photo.note && (
-                        <p className="mt-1 text-sm text-[#2B2B2B]">
-                          {photo.note}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
-        )}
-      </div>
-    </main>
+        </div>
+      )}
+    </>
   );
 }

@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
+import Link from "next/link";
 
 type PageProps = {
-  params: Promise<{
-    id: string;
-  }>;
+  params: Promise<{ id: string }>;
 };
 
 type Recipe = {
@@ -16,8 +14,16 @@ type Recipe = {
   name: string;
   description: string | null;
   calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  estimated_cooking_time_minutes: number | null;
   image_url: string | null;
   instructions: string | null;
+  is_vegetarian: boolean | null;
+  is_vegan: boolean | null;
+  is_dairy_free: boolean | null;
+  is_gluten_free: boolean | null;
 };
 
 type IngredientRow = {
@@ -28,7 +34,6 @@ type IngredientRow = {
   note: string;
 };
 
-
 export default function EditRecipePage({ params }: PageProps) {
   const [recipeId, setRecipeId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -37,8 +42,17 @@ export default function EditRecipePage({ params }: PageProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [calories, setCalories] = useState("");
+  const [proteinG, setProteinG] = useState("");
+  const [carbsG, setCarbsG] = useState("");
+  const [fatG, setFatG] = useState("");
+  const [cookingTime, setCookingTime] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [instructions, setInstructions] = useState("");
+
+  const [isVegetarian, setIsVegetarian] = useState(false);
+  const [isVegan, setIsVegan] = useState(false);
+  const [isDairyFree, setIsDairyFree] = useState(false);
+  const [isGlutenFree, setIsGlutenFree] = useState(false);
 
   const [ingredients, setIngredients] = useState<IngredientRow[]>([
     { ingredient_name: "", quantity: "", unit: "", note: "" },
@@ -74,13 +88,22 @@ export default function EditRecipePage({ params }: PageProps) {
 
       setName(recipe.name ?? "");
       setDescription(recipe.description ?? "");
-      setCalories(
-        recipe.calories !== null && recipe.calories !== undefined
-          ? String(recipe.calories)
+      setCalories(recipe.calories !== null && recipe.calories !== undefined ? String(recipe.calories) : "");
+      setProteinG(recipe.protein_g !== null && recipe.protein_g !== undefined ? String(recipe.protein_g) : "");
+      setCarbsG(recipe.carbs_g !== null && recipe.carbs_g !== undefined ? String(recipe.carbs_g) : "");
+      setFatG(recipe.fat_g !== null && recipe.fat_g !== undefined ? String(recipe.fat_g) : "");
+      setCookingTime(
+        recipe.estimated_cooking_time_minutes !== null &&
+          recipe.estimated_cooking_time_minutes !== undefined
+          ? String(recipe.estimated_cooking_time_minutes)
           : ""
       );
       setImageUrl(recipe.image_url ?? "");
       setInstructions(recipe.instructions ?? "");
+      setIsVegetarian(Boolean(recipe.is_vegetarian));
+      setIsVegan(Boolean(recipe.is_vegan));
+      setIsDairyFree(Boolean(recipe.is_dairy_free));
+      setIsGlutenFree(Boolean(recipe.is_gluten_free));
 
       const { data: ingredientData, error: ingredientError } = await supabase
         .from("recipe_ingredients")
@@ -151,20 +174,30 @@ export default function EditRecipePage({ params }: PageProps) {
         name: name.trim(),
         description: description.trim() || null,
         calories: calories.trim() ? Number(calories) : null,
+        protein_g: proteinG.trim() ? Number(proteinG) : null,
+        carbs_g: carbsG.trim() ? Number(carbsG) : null,
+        fat_g: fatG.trim() ? Number(fatG) : null,
+        estimated_cooking_time_minutes: cookingTime.trim()
+          ? Number(cookingTime)
+          : null,
         image_url: imageUrl.trim() || null,
         instructions: instructions.trim() || null,
+        is_vegetarian: isVegetarian,
+        is_vegan: isVegan,
+        is_dairy_free: isDairyFree,
+        is_gluten_free: isGlutenFree,
       })
       .eq("id", recipeId);
 
     if (recipeError) {
+      console.error(recipeError);
       alert("Error updating recipe");
       setSaving(false);
       return;
     }
 
     const cleanedRows = ingredients.filter(
-      (row) =>
-        row.ingredient_name.trim() !== "" && row.quantity.trim() !== ""
+      (row) => row.ingredient_name.trim() !== "" && row.quantity.trim() !== ""
     );
 
     const existingRows = cleanedRows.filter((row) => row.id);
@@ -232,196 +265,293 @@ export default function EditRecipePage({ params }: PageProps) {
     window.location.href = "/trainer/recipes";
   };
 
-  return (
-    <main className={styles.page}>
-      <div className="mx-auto max-w-6xl rounded-2xl bg-white p-6 shadow">
-        <PageHeader
-          title="Edit Recipe"
-          backHref="/trainer/recipes"
-          showTrainerNav
-        />
-
-        {loading ? (
-          <p className={styles.body}>Loading recipe...</p>
-        ) : (
-          <div className="space-y-6">
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Recipe Details</h2>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Recipe Name
-                  </label>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className={styles.input}
-                    placeholder="Recipe name"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-[#111111]">
-                    Calories
-                  </label>
-                  <input
-                    type="number"
-                    value={calories}
-                    onChange={(e) => setCalories(e.target.value)}
-                    className={styles.input}
-                    placeholder="Calories"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-sm font-medium text-[#111111]">
-                    Description
-                  </label>
-                  <input
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className={styles.input}
-                    placeholder="Short description"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-sm font-medium text-[#111111]">
-                    Image URL
-                  </label>
-                  <input
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    className={styles.input}
-                    placeholder="https://..."
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="text-sm font-medium text-[#111111]">
-                    Instructions
-                  </label>
-                  <textarea
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
-                    className={`${styles.input} min-h-[140px]`}
-                    placeholder="Cooking instructions"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.card}>
-              <div className="flex items-center justify-between">
-                <h2 className={styles.subheading}>Ingredients</h2>
-                <button
-                  type="button"
-                  onClick={addIngredientRow}
-                  className={styles.buttonSecondary}
-                >
-                  Add Ingredient
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {ingredients.map((row, index) => (
-                  <div
-                    key={row.id ?? `new-${index}`}
-                    className="grid gap-3 rounded-xl border border-slate-200 p-4 md:grid-cols-12"
-                  >
-                    <div className="md:col-span-3">
-                      <label className="text-sm font-medium text-[#111111]">
-                        Ingredient
-                      </label>
-                      <input
-                        value={row.ingredient_name}
-                        onChange={(e) =>
-                          updateIngredientRow(
-                            index,
-                            "ingredient_name",
-                            e.target.value
-                          )
-                        }
-                        className={styles.input}
-                        placeholder="e.g. Bagel"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="text-sm font-medium text-[#111111]">
-                        Quantity
-                      </label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={row.quantity}
-                        onChange={(e) =>
-                          updateIngredientRow(index, "quantity", e.target.value)
-                        }
-                        className={styles.input}
-                        placeholder="2"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="text-sm font-medium text-[#111111]">
-                        Unit
-                      </label>
-                      <input
-                        value={row.unit}
-                        onChange={(e) =>
-                          updateIngredientRow(index, "unit", e.target.value)
-                        }
-                        className={styles.input}
-                        placeholder="item / g / ml"
-                      />
-                    </div>
-
-                    <div className="md:col-span-4">
-                      <label className="text-sm font-medium text-[#111111]">
-                        Note
-                      </label>
-                      <input
-                        value={row.note}
-                        onChange={(e) =>
-                          updateIngredientRow(index, "note", e.target.value)
-                        }
-                        className={styles.input}
-                        placeholder="e.g. Warburton bagel thins"
-                      />
-                    </div>
-
-                    <div className="md:col-span-1 flex items-end">
-                      <button
-                        type="button"
-                        onClick={() => removeIngredientRow(index)}
-                        className="w-full rounded-xl border border-red-300 px-3 py-2 text-red-600 hover:bg-red-50"
-                      >
-                        X
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {!hasRealIngredients && (
-                <p className="mt-3 text-sm text-[#2B2B2B]">
-                  No structured ingredients yet. Add rows above to migrate this recipe.
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
-            >
-              {saving ? "Saving..." : "Save Changes"}
-            </button>
-          </div>
-        )}
+return (
+    <>
+      <div className="mb-6 flex items-center gap-4">
+        <Link href="/trainer/recipes" className={styles.buttonSecondary}>
+          ← Back
+        </Link>
+        <h1 className={styles.display}>Edit Recipe</h1>
       </div>
-    </main>
+
+      {loading ? (
+        <p className={styles.body}>Loading recipe...</p>
+      ) : (
+        <div className="space-y-6">
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Recipe Details</h2>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Recipe Name
+                </label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={styles.input}
+                  placeholder="Recipe name"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Calories
+                </label>
+                <input
+                  type="number"
+                  value={calories}
+                  onChange={(e) => setCalories(e.target.value)}
+                  className={styles.input}
+                  placeholder="Calories"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Protein (g)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={proteinG}
+                  onChange={(e) => setProteinG(e.target.value)}
+                  className={styles.input}
+                  placeholder="Protein"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Carbs (g)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={carbsG}
+                  onChange={(e) => setCarbsG(e.target.value)}
+                  className={styles.input}
+                  placeholder="Carbs"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Fat (g)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={fatG}
+                  onChange={(e) => setFatG(e.target.value)}
+                  className={styles.input}
+                  placeholder="Fat"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Est. Cooking Time (minutes)
+                </label>
+                <input
+                  type="number"
+                  value={cookingTime}
+                  onChange={(e) => setCookingTime(e.target.value)}
+                  className={styles.input}
+                  placeholder="e.g. 20"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-ink">
+                  Description
+                </label>
+                <input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className={styles.input}
+                  placeholder="Short description"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-ink">
+                  Image URL
+                </label>
+                <input
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  className={styles.input}
+                  placeholder="https://..."
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-ink">
+                  Tags
+                </label>
+                <div className="mt-2 grid gap-3 md:grid-cols-4">
+                  <label className="flex items-center gap-2 rounded-xl border border-border-subtle p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isVegetarian}
+                      onChange={(e) => setIsVegetarian(e.target.checked)}
+                    />
+                    Vegetarian
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl border border-border-subtle p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isVegan}
+                      onChange={(e) => setIsVegan(e.target.checked)}
+                    />
+                    Vegan
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl border border-border-subtle p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isDairyFree}
+                      onChange={(e) => setIsDairyFree(e.target.checked)}
+                    />
+                    Dairy free
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl border border-border-subtle p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isGlutenFree}
+                      onChange={(e) => setIsGlutenFree(e.target.checked)}
+                    />
+                    Gluten free
+                  </label>
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-ink">
+                  Instructions
+                </label>
+                <textarea
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  className={`${styles.input} min-h-35`}
+                  placeholder="Cooking instructions"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.card}>
+            <div className="flex items-center justify-between">
+              <h2 className={styles.h2}>Ingredients</h2>
+              <button
+                type="button"
+                onClick={addIngredientRow}
+                className={styles.buttonSecondary}
+              >
+                Add Ingredient
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {ingredients.map((row, index) => (
+                <div
+                  key={row.id ?? `new-${index}`}
+                  className="grid gap-3 rounded-xl border border-border-subtle p-4 md:grid-cols-12"
+                >
+                  <div className="md:col-span-3">
+                    <label className="text-sm font-medium text-ink">
+                      Ingredient
+                    </label>
+                    <input
+                      value={row.ingredient_name}
+                      onChange={(e) =>
+                        updateIngredientRow(
+                          index,
+                          "ingredient_name",
+                          e.target.value
+                        )
+                      }
+                      className={styles.input}
+                      placeholder="e.g. Bagel"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-medium text-ink">
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={row.quantity}
+                      onChange={(e) =>
+                        updateIngredientRow(index, "quantity", e.target.value)
+                      }
+                      className={styles.input}
+                      placeholder="2"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-medium text-ink">
+                      Unit
+                    </label>
+                    <input
+                      value={row.unit}
+                      onChange={(e) =>
+                        updateIngredientRow(index, "unit", e.target.value)
+                      }
+                      className={styles.input}
+                      placeholder="item / g / ml"
+                    />
+                  </div>
+
+                  <div className="md:col-span-4">
+                    <label className="text-sm font-medium text-ink">
+                      Note
+                    </label>
+                    <input
+                      value={row.note}
+                      onChange={(e) =>
+                        updateIngredientRow(index, "note", e.target.value)
+                      }
+                      className={styles.input}
+                      placeholder="e.g. Warburton bagel thins"
+                    />
+                  </div>
+
+                  <div className="md:col-span-1 flex items-end">
+                    <button
+                      type="button"
+                      onClick={() => removeIngredientRow(index)}
+                      className="w-full rounded-xl border border-red-300 px-3 py-2 text-red-600 hover:bg-red-50"
+                    >
+                      X
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {!hasRealIngredients && (
+              <p className="mt-3 text-sm text-ink-muted">
+                No structured ingredients yet. Add rows above to migrate this recipe.
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={`${styles.buttonPrimary} w-full py-3 disabled:opacity-50`}
+          >
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

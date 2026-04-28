@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import PageHeader from "@/components/PageHeader";
 import { styles } from "@/lib/design";
 
 type Client = {
@@ -13,6 +12,7 @@ type Client = {
   protein_g: number | null;
   profile_id: string | null;
   onboarding_complete: boolean | null;
+  daily_step_target: number;
 };
 
 type ClientProgramDay = {
@@ -42,6 +42,12 @@ type WeightLog = {
   note: string | null;
 };
 
+type DailyTracking = {
+  id: string;
+  water_completed: boolean;
+  steps_logged: number | null;
+};
+
 export default function ClientDashboardPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [currentDay, setCurrentDay] = useState<ClientProgramDay | null>(null);
@@ -50,6 +56,11 @@ export default function ClientDashboardPage() {
   const [todayCalories, setTodayCalories] = useState(0);
   const [latestWeight, setLatestWeight] = useState<WeightLog | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [dailyTracking, setDailyTracking] = useState<DailyTracking | null>(null);
+  const [stepsInput, setStepsInput] = useState("");
+  const [savingSteps, setSavingSteps] = useState(false);
+  const [togglingWater, setTogglingWater] = useState(false);
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
@@ -101,11 +112,27 @@ export default function ClientDashboardPage() {
     }
 
     if (clientData.onboarding_complete === false) {
-      window.location.href = "/client/onboarding";
+      window.location.href = "/onboarding";
       return;
     }
 
     setClient(clientData);
+
+    // Load daily tracking
+    const { data: trackingData } = await supabase
+      .from("daily_tracking")
+      .select("*")
+      .eq("client_id", clientData.id)
+      .eq("log_date", today)
+      .maybeSingle();
+
+    if (trackingData) {
+      setDailyTracking(trackingData);
+      setStepsInput(trackingData.steps_logged?.toString() ?? "");
+    } else {
+      setDailyTracking(null);
+      setStepsInput("");
+    }
 
     const { data: weightData } = await supabase
       .from("client_weight_logs")
@@ -123,10 +150,10 @@ export default function ClientDashboardPage() {
       .order("created_at", { ascending: false })
       .limit(1);
 
-      if (!clientProgramError && (!clientProgramData || clientProgramData.length === 0)) {
-  window.location.href = "/client/onboarding";
-  return;
-}
+    if (!clientProgramError && (!clientProgramData || clientProgramData.length === 0)) {
+      window.location.href = "/onboarding";
+      return;
+    }
 
     if (!clientProgramError && clientProgramData && clientProgramData.length > 0) {
       const program = clientProgramData[0];
@@ -178,7 +205,8 @@ export default function ClientDashboardPage() {
     } else {
       setCurrentDay(null);
       setDayExercises([]);
-setSetLogs([]);    }
+      setSetLogs([]);
+    }
 
     let recipeCaloriesTotal = 0;
     let customCaloriesTotal = 0;
@@ -218,6 +246,98 @@ setSetLogs([]);    }
     setLoading(false);
   };
 
+  const handleSaveSteps = async () => {
+    if (!client) return;
+
+    const steps = parseInt(stepsInput);
+    if (isNaN(steps) || steps < 0) {
+      alert("Please enter a valid step count");
+      return;
+    }
+
+    setSavingSteps(true);
+
+    if (dailyTracking) {
+      const { error } = await supabase
+        .from("daily_tracking")
+        .update({ steps_logged: steps })
+        .eq("id", dailyTracking.id);
+
+      if (error) {
+        alert("Error saving steps");
+        setSavingSteps(false);
+        return;
+      }
+
+      setDailyTracking({ ...dailyTracking, steps_logged: steps });
+    } else {
+      const { data, error } = await supabase
+        .from("daily_tracking")
+        .insert({
+          client_id: client.id,
+          log_date: today,
+          steps_logged: steps,
+          water_completed: false,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        alert("Error saving steps");
+        setSavingSteps(false);
+        return;
+      }
+
+      setDailyTracking(data);
+    }
+
+    setSavingSteps(false);
+  };
+
+  const handleToggleWater = async () => {
+    if (!client) return;
+
+    setTogglingWater(true);
+
+    const newWaterStatus = !dailyTracking?.water_completed;
+
+    if (dailyTracking) {
+      const { error } = await supabase
+        .from("daily_tracking")
+        .update({ water_completed: newWaterStatus })
+        .eq("id", dailyTracking.id);
+
+      if (error) {
+        alert("Error updating water");
+        setTogglingWater(false);
+        return;
+      }
+
+      setDailyTracking({ ...dailyTracking, water_completed: newWaterStatus });
+    } else {
+      const { data, error } = await supabase
+        .from("daily_tracking")
+        .insert({
+          client_id: client.id,
+          log_date: today,
+          water_completed: newWaterStatus,
+          steps_logged: null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        alert("Error updating water");
+        setTogglingWater(false);
+        return;
+      }
+
+      setDailyTracking(data);
+    }
+
+    setTogglingWater(false);
+  };
+
   useEffect(() => {
     loadDashboard();
   }, [today]);
@@ -228,89 +348,170 @@ setSetLogs([]);    }
   };
 
   return (
-    <main className={styles.page}>
-      <div className={styles.container}>
-        <PageHeader
-          title="Dashboard"
-          rightAction={
-            <button onClick={handleLogout} className={styles.buttonPrimary}>
-              Logout
-            </button>
-          }
-        />
+    <>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className={styles.display}>Dashboard</h1>
+        <button onClick={handleLogout} className={styles.buttonPrimary}>
+          Logout
+        </button>
+      </div>
 
-        {loading ? (
-          <p className={styles.body}>Loading dashboard...</p>
-        ) : !client ? (
-          <p className={styles.body}>Client not found.</p>
-        ) : (
-          <div className="space-y-4">
-            <div className={styles.card}>
-              <h2 className={`text-2xl font-semibold ${styles.goldText}`}>
-                Welcome, {client.full_name}
-              </h2>
-              <p className={`mt-2 ${styles.body}`}>
-                Here’s your progress for today.
-              </p>
-            </div>
+      {loading ? (
+        <p className={styles.body}>Loading dashboard...</p>
+      ) : !client ? (
+        <p className={styles.body}>Client not found.</p>
+      ) : (
+        <div className="space-y-4">
+          <div className={styles.card}>
+            <h2 className={`text-2xl font-semibold ${styles.goldText}`}>
+              Welcome, {client.full_name}
+            </h2>
+            <p className={`mt-2 ${styles.body}`}>
+              Here's your progress for today.
+            </p>
+          </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Link
-                href="/client/workout"
-                className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea]`}
-              >
-                <p className="text-sm text-[#2B2B2B]">Today’s Workout</p>
-                <p className="mt-1 text-lg font-semibold text-[#111111]">
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Workout Card with Steps */}
+            <div className="rounded-lg bg-surface-sunken p-5 shadow-subtle">
+              <Link href="/client/workout" className="block">
+                <p className="text-sm text-ink-muted">Today's Workout</p>
+                <p className="mt-1 text-lg font-semibold text-ink">
                   {currentDay?.day_name || "No active programme day"}
                 </p>
-                <p className="mt-2 text-sm text-[#2B2B2B]">
+                <p className="mt-2 text-sm text-ink-muted">
                   {completedExercises} of {totalExercises} exercises complete
                 </p>
               </Link>
 
-              <Link
-                href="/client/nutrition"
-                className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea]`}
-              >
-                <p className="text-sm text-[#2B2B2B]">Food Eaten Today</p>
-                <p className="mt-1 text-lg font-semibold text-[#111111]">
-                  {todayCalories} kcal
-                </p>
-                <p className="mt-2 text-sm text-[#2B2B2B]">
-                  Remaining: {caloriesRemaining ?? "-"} kcal
-                </p>
-              </Link>
+              <div className="mt-4 border-t border-border-subtle pt-4">
+                <p className="text-sm font-medium text-ink">Today's Steps</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={stepsInput}
+                    onChange={(e) => setStepsInput(e.target.value)}
+                    placeholder="0"
+                    className="flex-1 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-ink"
+                  />
+                  <span className="text-sm text-ink-muted">
+                    / {client.daily_step_target.toLocaleString()}
+                  </span>
+                  <button
+                    onClick={handleSaveSteps}
+                    disabled={savingSteps}
+                    className={styles.buttonPrimaryWorkout}
+                  >
+                    {savingSteps ? "Saving..." : "Save"}
+                  </button>
+                </div>
+                {dailyTracking?.steps_logged !== null && (
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-navy transition-all"
+                      style={{
+                        width: `${Math.min(
+                          ((dailyTracking?.steps_logged ?? 0) /
+                            client.daily_step_target) *
+                            100,
+                          100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
-            <Link
-              href="/client/stats"
-              className={`${styles.card} bg-[#F2F2F2] transition hover:bg-[#eaeaea] block`}
-            >
-              <p className="text-sm text-[#2B2B2B]">My Stats</p>
-              <p className="mt-1 text-lg font-semibold text-[#111111]">
-                {latestWeight
-                  ? `Latest weight: ${latestWeight.weight_kg} kg`
-                  : "Track weight, measurements, and progress photos"}
-              </p>
+            {/* Nutrition Card with Water */}
+            <div className="rounded-lg bg-surface-sunken p-5 shadow-subtle">
+              <Link href="/client/nutrition" className="block">
+                <p className="text-sm text-ink-muted">Food Eaten Today</p>
+                <p className="mt-1 text-lg font-semibold text-ink">
+                  {todayCalories} / {client.calorie_target ?? "-"} kcal
+                </p>
 
-              <div className="mt-3 h-20 rounded-xl bg-white/70 p-3">
-                <div className="flex h-full items-end gap-2">
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "35%" }} />
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "55%" }} />
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "48%" }} />
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "70%" }} />
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "62%" }} />
-                  <div className="w-1/6 rounded-t bg-[#D4AF37]" style={{ height: "82%" }} />
+                {client.calorie_target ? (
+                  <>
+                    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          Math.abs(client.calorie_target - todayCalories) <= 100
+                            ? "bg-green-500"
+                            : Math.abs(client.calorie_target - todayCalories) <= 300
+                            ? "bg-amber-500"
+                            : "bg-red-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(
+                            (todayCalories / client.calorie_target) * 100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="mt-2 text-sm text-ink-muted">
+                      {caloriesRemaining !== null && caloriesRemaining >= 0
+                        ? `${caloriesRemaining} kcal remaining`
+                        : `${Math.abs(caloriesRemaining ?? 0)} kcal over target`}
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm text-ink-muted">No calorie target set</p>
+                )}
+              </Link>
+
+              <div className="mt-4 border-t border-border-subtle pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-ink">Water (2L target)</p>
+                  <button
+                    onClick={handleToggleWater}
+                    disabled={togglingWater}
+                    className={
+                      dailyTracking?.water_completed
+                        ? styles.buttonPrimaryNutrition
+                        : styles.buttonSecondary
+                    }
+                  >
+                    {togglingWater
+                      ? "..."
+                      : dailyTracking?.water_completed
+                      ? "✓ Complete"
+                      : "Mark Complete"}
+                  </button>
                 </div>
               </div>
-
-              <p className="mt-2 text-sm text-[#2B2B2B]">
-                View graphs, measurements, and photos
-              </p>
-            </Link>
+            </div>
           </div>
-        )}
-      </div>
-    </main>
+
+          <Link
+            href="/client/stats"
+            className={`${styles.cardInteractive} bg-surface-sunken block`}
+          >
+            <p className="text-sm text-ink-muted">My Stats</p>
+            <p className="mt-1 text-lg font-semibold text-ink">
+              {latestWeight
+                ? `Latest weight: ${latestWeight.weight_kg} kg`
+                : "Track weight, measurements, and progress photos"}
+            </p>
+
+            <div className="mt-3 h-20 rounded-xl bg-white/70 p-3">
+              <div className="flex h-full items-end gap-2">
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "35%" }} />
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "55%" }} />
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "48%" }} />
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "70%" }} />
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "62%" }} />
+                <div className="w-1/6 rounded-t bg-gold" style={{ height: "82%" }} />
+              </div>
+            </div>
+
+            <p className="mt-2 text-sm text-ink-muted">
+              View graphs, measurements, and photos
+            </p>
+          </Link>
+        </div>
+      )}
+    </>
   );
 }
