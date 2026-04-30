@@ -39,6 +39,7 @@ export default function ClientMealPlannerPage() {
   const [selectedDate, setSelectedDate] = useState(
     new Date().toISOString().split("T")[0]
   );
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [addingMeal, setAddingMeal] = useState(false);
   const [updatingMealId, setUpdatingMealId] = useState<string | null>(null);
@@ -50,6 +51,17 @@ export default function ClientMealPlannerPage() {
       return sum + calories * (meal.quantity ?? 1);
     }, 0);
   }, [plannedMeals]);
+
+  const filteredRecipes = useMemo(() => {
+    if (!searchQuery.trim()) return recipes;
+
+    const query = searchQuery.toLowerCase();
+    return recipes.filter((recipe) => {
+      const name = recipe.name?.toLowerCase() || "";
+      const description = recipe.description?.toLowerCase() || "";
+      return name.includes(query) || description.includes(query);
+    });
+  }, [recipes, searchQuery]);
 
   const loadPage = async () => {
     setLoading(true);
@@ -177,6 +189,7 @@ export default function ClientMealPlannerPage() {
     }
 
     setSelectedRecipeId("");
+    setSearchQuery("");
     setAddingMeal(false);
     await loadPage();
   };
@@ -221,7 +234,7 @@ export default function ClientMealPlannerPage() {
     setRemovingMealId(null);
   };
 
-return (
+  return (
     <>
       <h1 className={styles.display}>Meal Planner</h1>
 
@@ -272,6 +285,20 @@ return (
           <div className={styles.card}>
             <h2 className={styles.h2}>Add Planned Meal</h2>
 
+            {/* Search Box */}
+            <div className="mt-4">
+              <label className="text-sm font-medium text-ink">
+                Search recipes
+              </label>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name or description..."
+                className={styles.input}
+              />
+            </div>
+
             <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
               <div>
                 <label className="text-sm font-medium text-ink">
@@ -283,7 +310,7 @@ return (
                   className={styles.input}
                 >
                   <option value="">Select a recipe</option>
-                  {recipes.map((recipe) => (
+                  {filteredRecipes.map((recipe) => (
                     <option key={recipe.id} value={recipe.id}>
                       {recipe.name}
                       {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}

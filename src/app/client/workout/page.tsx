@@ -15,6 +15,8 @@ type ClientProgram = {
   client_id: string;
   program_template_id: string | null;
   current_day_index: number | null;
+  program_start_date: string | null;
+  current_week: number;
 };
 
 type ClientProgramDay = {
@@ -25,6 +27,17 @@ type ClientProgramDay = {
   completed: boolean | null;
 };
 
+type Exercise = {
+  id: string;
+  name: string;
+  youtube_short: string | null;
+  rest: number | null;
+  target_muscle: string | null;
+  movement_type: string | null;
+  primary_equipment: string | null;
+  alternate: string | null;
+};
+
 type ClientProgramDayExercise = {
   id: string;
   client_program_day_id: string;
@@ -33,6 +46,7 @@ type ClientProgramDayExercise = {
   reps: string | null;
   target_weight_kg: number | null;
   sort_order: number | null;
+  exercise_details?: Exercise | null;
 };
 
 type ClientProgramSetLog = {
@@ -51,6 +65,13 @@ type DraftValues = {
 
 type PreviousWeightMap = Record<string, number | null>;
 
+type RestTimer = {
+  exerciseId: string;
+  setNumber: number;
+  secondsRemaining: number;
+  totalSeconds: number;
+};
+
 export default function ClientWorkoutPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
@@ -66,6 +87,30 @@ export default function ClientWorkoutPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [completingDay, setCompletingDay] = useState(false);
   const [debugMessage, setDebugMessage] = useState("");
+  const [restTimer, setRestTimer] = useState<RestTimer | null>(null);
+  const [showVideo, setShowVideo] = useState(false);
+
+  // Rest timer countdown
+  useEffect(() => {
+    if (!restTimer) return;
+
+    if (restTimer.secondsRemaining <= 0) {
+      setRestTimer(null);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setRestTimer((prev) => {
+        if (!prev || prev.secondsRemaining <= 1) return null;
+        return {
+          ...prev,
+          secondsRemaining: prev.secondsRemaining - 1,
+        };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [restTimer]);
 
   useEffect(() => {
     const loadWorkout = async () => {
@@ -142,6 +187,7 @@ export default function ClientWorkoutPage() {
       setCurrentDay(selectedDay);
       setDrafts({});
       setPreviousWeights({});
+      setShowVideo(false);
 
       if (!selectedDay) {
         setDayExercises([]);
@@ -168,9 +214,37 @@ export default function ClientWorkoutPage() {
         return;
       }
 
-      setDayExercises(exerciseData);
-      setActiveExerciseId(exerciseData[0]?.id ?? "");
-      const exerciseIds = exerciseData.map((e) => e.id);
+      // Load exercise details from exercises table
+      const exerciseNames = exerciseData
+        .map((e) => e.exercise_name)
+        .filter(Boolean) as string[];
+
+      let exerciseDetailsMap: Record<string, Exercise> = {};
+
+      if (exerciseNames.length > 0) {
+        const { data: exerciseDetails } = await supabase
+          .from("exercises")
+          .select("*")
+          .in("name", exerciseNames);
+
+        if (exerciseDetails) {
+          exerciseDetailsMap = Object.fromEntries(
+            exerciseDetails.map((ex) => [ex.name, ex])
+          );
+        }
+      }
+
+      // Attach exercise details to each day exercise
+      const enrichedExercises = exerciseData.map((ex) => ({
+        ...ex,
+        exercise_details: ex.exercise_name
+          ? exerciseDetailsMap[ex.exercise_name] || null
+          : null,
+      }));
+
+      setDayExercises(enrichedExercises);
+      setActiveExerciseId(enrichedExercises[0]?.id ?? "");
+      const exerciseIds = enrichedExercises.map((e) => e.id);
 
       if (exerciseIds.length > 0) {
         const { data: setLogData, error: setLogError } = await supabase
@@ -190,18 +264,18 @@ export default function ClientWorkoutPage() {
         setSetLogs([]);
       }
 
-      const exerciseNames = Array.from(
+      const exerciseNamesForPrevious = Array.from(
         new Set(
-          exerciseData
+          enrichedExercises
             .map((exercise) => exercise.exercise_name?.trim())
             .filter(Boolean)
         )
       ) as string[];
 
-      if (exerciseNames.length > 0) {
+      if (exerciseNamesForPrevious.length > 0) {
         const previousWeightLookup: Record<string, number | null> = {};
 
-        for (const exerciseName of exerciseNames) {
+        for (const exerciseName of exerciseNamesForPrevious) {
           const { data: matchingExercises } = await supabase
             .from("client_program_day_exercises")
             .select("id")
@@ -311,10 +385,11 @@ export default function ClientWorkoutPage() {
     totalExercises > 0
       ? Math.round((completedExerciseCount / totalExercises) * 100)
       : 0;
-const activeExercise =
-  dayExercises.find((exercise) => exercise.id === activeExerciseId) ??
-  dayExercises[0] ??
-  null;
+
+  const activeExercise =
+    dayExercises.find((exercise) => exercise.id === activeExerciseId) ??
+    dayExercises[0] ??
+    null;
 
   const upsertSetLog = async ({
     clientId,
@@ -339,6 +414,30 @@ const activeExercise =
     setSavingKey(key);
 
     const existing = getSetLog(exerciseId, setNumber);
+
+    // FIRST WORKOUT TRIGGER: Check if program needs to be started
+    if (!existing && clientProgram?.program_start_date === null) {
+      const today = new Date().toISOString().split("T")[0];
+      
+      await supabase
+        .from("client_programs")
+        .update({
+          program_start_date: today,
+          current_week: 1,
+        })
+        .eq("id", clientProgramId);
+
+      // Update local state
+      setClientProgram((prev) =>
+        prev
+          ? {
+              ...prev,
+              program_start_date: today,
+              current_week: 1,
+            }
+          : null
+      );
+    }
 
     if (existing) {
       const { data, error } = await supabase
@@ -409,6 +508,16 @@ const activeExercise =
         actual_reps: repsValue === "" ? null : Number(repsValue),
       },
     });
+
+    // Start rest timer if completing the set
+    if (checked && exercise.exercise_details?.rest) {
+      setRestTimer({
+        exerciseId: exercise.id,
+        setNumber,
+        secondsRemaining: exercise.exercise_details.rest,
+        totalSeconds: exercise.exercise_details.rest,
+      });
+    }
   };
 
   const handleWeightChange = (exerciseId: string, setNumber: number, value: string) => {
@@ -511,9 +620,59 @@ const activeExercise =
     alert("Workout day completed!");
   };
 
-return (
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const getYouTubeEmbedUrl = (url: string | null) => {
+    if (!url) return null;
+    
+    // Extract video ID from various YouTube URL formats
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\?\/]+)/,
+      /youtube\.com\/shorts\/([^&\?\/]+)/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) {
+        return `https://www.youtube.com/embed/${match[1]}`;
+      }
+    }
+    
+    return null;
+  };
+
+  return (
     <>
       <h1 className={styles.display}>Workout</h1>
+
+      {/* Rest Timer Banner */}
+      {restTimer && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-workout px-4 py-3 text-white shadow-lg">
+          <div className="mx-auto flex max-w-7xl items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Rest Timer</p>
+              <p className="text-xs opacity-90">
+                Set {restTimer.setNumber} complete
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <p className="text-2xl font-bold tabular-nums">
+                {formatTime(restTimer.secondsRemaining)}
+              </p>
+              <button
+                onClick={() => setRestTimer(null)}
+                className="rounded-lg bg-white/20 px-3 py-1 text-sm font-medium hover:bg-white/30"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className={styles.body}>Loading workout...</p>
@@ -534,6 +693,11 @@ return (
                 <p className="mt-1 text-sm text-ink-muted">
                   Current selected day
                 </p>
+                {clientProgram.current_week > 0 && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Week {clientProgram.current_week}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -567,155 +731,232 @@ return (
             <div className="mt-3">
               <div className="h-3 w-full rounded-full bg-surface-sunken">
                 <div
-                  className="styles.primarybutton.Workout"
+                  className="h-full rounded-full bg-workout transition-all"
                   style={{ width: `${completionPercentage}%` }}
                 />
               </div>
             </div>
           </div>
 
-<div className="space-y-4">
-  {dayExercises.length > 0 && activeExercise ? (
-    <>
-      <div className="flex gap-2 overflow-x-auto rounded-2xl bg-surface-sunken p-2">
-        {dayExercises.map((exercise, index) => {
-          const isActive = exercise.id === activeExercise.id;
+          <div className="space-y-4">
+            {dayExercises.length > 0 && activeExercise ? (
+              <>
+                <div className="flex gap-2 overflow-x-auto rounded-2xl bg-surface-sunken p-2">
+                  {dayExercises.map((exercise, index) => {
+                    const isActive = exercise.id === activeExercise.id;
 
-          return (
-            <button
-              key={exercise.id}
-              type="button"
-              onClick={() => setActiveExerciseId(exercise.id)}
-className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-xl transition ${
-  isActive
-    ? styles.buttonPrimaryWorkout
-    : "bg-white text-ink border border-slate-200 hover:bg-surface"
-}`}
-            >
-              {exercise.exercise_name || `Exercise ${index + 1}`}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className={styles.card}>
-        <p className="font-semibold text-ink">
-          {activeExercise.exercise_name}
-        </p>
-
-        <p className="text-sm text-ink-muted">
-          Target: {activeExercise.sets ?? "-"} sets × {activeExercise.reps ?? "-"} reps
-          {activeExercise.target_weight_kg !== null
-            ? ` × ${activeExercise.target_weight_kg}kg`
-            : ""}
-        </p>
-
-        <div className="mt-4 space-y-3">
-          {(activeExercise.sets && activeExercise.sets > 0
-            ? Array.from({ length: activeExercise.sets }, (_, i) => i + 1)
-            : [1]
-          ).map((setNumber) => {
-            const setLog = getSetLog(activeExercise.id, setNumber);
-            const currentKey = getDraftKey(activeExercise.id, setNumber);
-
-            const rememberedWeight =
-              activeExercise.exercise_name &&
-              previousWeights[activeExercise.exercise_name] !== null &&
-              previousWeights[activeExercise.exercise_name] !== undefined
-                ? previousWeights[activeExercise.exercise_name]
-                : null;
-
-            return (
-              <div
-                key={setNumber}
-                className="grid gap-3 rounded-xl bg-surface-sunken p-3 md:grid-cols-12"
-              >
-                <div className="md:col-span-2 flex items-center">
-                  <p className="text-sm font-medium text-ink">
-                    Set {setNumber}
-                  </p>
+                    return (
+                      <button
+                        key={exercise.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveExerciseId(exercise.id);
+                          setShowVideo(false);
+                        }}
+                        className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-medium transition ${
+                          isActive
+                            ? styles.buttonPrimaryWorkout
+                            : "border border-slate-200 bg-white text-ink hover:bg-surface"
+                        }`}
+                      >
+                        {exercise.exercise_name || `Exercise ${index + 1}`}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <div className="md:col-span-4">
-                  <label className="text-sm font-medium text-ink">
-                    Weight (kg)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    value={getDisplayWeight(activeExercise, setNumber)}
-                    onChange={(e) =>
-                      handleWeightChange(
-                        activeExercise.id,
-                        setNumber,
-                        e.target.value
-                      )
-                    }
-                    onBlur={() => handleWeightBlur(activeExercise, setNumber)}
-                    className={styles.input}
-                    placeholder="Weight"
-                  />
-                  {rememberedWeight !== null && (
-                    <p className="mt-1 text-xs text-ink-muted">
-                      Previous weight: {rememberedWeight} kg
-                    </p>
+                <div className={styles.card}>
+                  <p className="font-semibold text-ink">
+                    {activeExercise.exercise_name}
+                  </p>
+
+                  <p className="text-sm text-ink-muted">
+                    Target: {activeExercise.sets ?? "-"} sets ×{" "}
+                    {activeExercise.reps ?? "-"} reps
+                    {activeExercise.target_weight_kg !== null
+                      ? ` × ${activeExercise.target_weight_kg}kg`
+                      : ""}
+                  </p>
+
+                  {/* Exercise Details */}
+                  {activeExercise.exercise_details && (
+                    <div className="mt-3 grid gap-2 rounded-xl bg-surface-sunken p-3 text-sm md:grid-cols-3">
+                      {activeExercise.exercise_details.primary_equipment && (
+                        <div>
+                          <p className="font-medium text-ink">Equipment</p>
+                          <p className="text-ink-muted">
+                            {activeExercise.exercise_details.primary_equipment}
+                          </p>
+                        </div>
+                      )}
+                      {activeExercise.exercise_details.target_muscle && (
+                        <div>
+                          <p className="font-medium text-ink">Target Muscle</p>
+                          <p className="text-ink-muted">
+                            {activeExercise.exercise_details.target_muscle}
+                          </p>
+                        </div>
+                      )}
+                      {activeExercise.exercise_details.movement_type && (
+                        <div>
+                          <p className="font-medium text-ink">Movement Type</p>
+                          <p className="text-ink-muted">
+                            {activeExercise.exercise_details.movement_type}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-4 space-y-3">
+                    {(activeExercise.sets && activeExercise.sets > 0
+                      ? Array.from({ length: activeExercise.sets }, (_, i) => i + 1)
+                      : [1]
+                    ).map((setNumber) => {
+                      const setLog = getSetLog(activeExercise.id, setNumber);
+                      const currentKey = getDraftKey(activeExercise.id, setNumber);
+
+                      const rememberedWeight =
+                        activeExercise.exercise_name &&
+                        previousWeights[activeExercise.exercise_name] !== null &&
+                        previousWeights[activeExercise.exercise_name] !== undefined
+                          ? previousWeights[activeExercise.exercise_name]
+                          : null;
+
+                      return (
+                        <div
+                          key={setNumber}
+                          className="grid gap-3 rounded-xl bg-surface-sunken p-3 md:grid-cols-12"
+                        >
+                          <div className="flex items-center md:col-span-2">
+                            <p className="text-sm font-medium text-ink">
+                              Set {setNumber}
+                            </p>
+                          </div>
+
+                          <div className="md:col-span-4">
+                            <label className="text-sm font-medium text-ink">
+                              Weight (kg)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              value={getDisplayWeight(activeExercise, setNumber)}
+                              onChange={(e) =>
+                                handleWeightChange(
+                                  activeExercise.id,
+                                  setNumber,
+                                  e.target.value
+                                )
+                              }
+                              onBlur={() =>
+                                handleWeightBlur(activeExercise, setNumber)
+                              }
+                              className={styles.input}
+                              placeholder="Weight"
+                            />
+                            {rememberedWeight !== null && (
+                              <p className="mt-1 text-xs text-ink-muted">
+                                Previous weight: {rememberedWeight} kg
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="md:col-span-4">
+                            <label className="text-sm font-medium text-ink">
+                              Reps completed
+                            </label>
+                            <input
+                              type="number"
+                              value={getDisplayReps(activeExercise, setNumber)}
+                              onChange={(e) =>
+                                handleRepsChange(
+                                  activeExercise.id,
+                                  setNumber,
+                                  e.target.value
+                                )
+                              }
+                              onBlur={() =>
+                                handleRepsBlur(activeExercise, setNumber)
+                              }
+                              className={styles.input}
+                              placeholder="Reps"
+                            />
+                          </div>
+
+                          <div className="flex items-end justify-end md:col-span-2">
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-ink">
+                              Completed
+                              <input
+                                type="checkbox"
+                                checked={setLog?.completed ?? false}
+                                onChange={(e) =>
+                                  handleToggleSet(
+                                    activeExercise,
+                                    setNumber,
+                                    e.target.checked
+                                  )
+                                }
+                                disabled={savingKey === currentKey}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* YouTube Video Section */}
+                  {activeExercise.exercise_details?.youtube_short && (
+                    <div className="mt-4">
+                      {!showVideo ? (
+                        <button
+                          onClick={() => setShowVideo(true)}
+                          className={`${styles.buttonSecondary} w-full`}
+                        >
+                          Watch Exercise Video
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-ink">
+                              Exercise Video
+                            </p>
+                            <button
+                              onClick={() => setShowVideo(false)}
+                              className="text-sm text-ink-muted hover:text-ink"
+                            >
+                              Hide
+                            </button>
+                          </div>
+                          <div className="relative overflow-hidden rounded-xl" style={{ paddingBottom: "56.25%" }}>
+                            <iframe
+                              src={getYouTubeEmbedUrl(
+                                activeExercise.exercise_details.youtube_short
+                              ) || ""}
+                              className="absolute inset-0 h-full w-full"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-
-                <div className="md:col-span-4">
-                  <label className="text-sm font-medium text-ink">
-                    Reps completed
-                  </label>
-                  <input
-                    type="number"
-                    value={getDisplayReps(activeExercise, setNumber)}
-                    onChange={(e) =>
-                      handleRepsChange(
-                        activeExercise.id,
-                        setNumber,
-                        e.target.value
-                      )
-                    }
-                    onBlur={() => handleRepsBlur(activeExercise, setNumber)}
-                    className={styles.input}
-                    placeholder="Reps"
-                  />
-                </div>
-
-                <div className="md:col-span-2 flex items-end justify-end">
-                  <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-ink">
-                    Completed
-                    <input
-                      type="checkbox"
-                      checked={setLog?.completed ?? false}
-                      onChange={(e) =>
-                        handleToggleSet(
-                          activeExercise,
-                          setNumber,
-                          e.target.checked
-                        )
-                      }
-                      disabled={savingKey === currentKey}
-                    />
-                  </label>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </>
-  ) : (
-    <p className={styles.body}>
-      {debugMessage || "No exercises assigned for this day yet."}
-    </p>
-  )}
-</div>
+              </>
+            ) : (
+              <p className={styles.body}>
+                {debugMessage || "No exercises assigned for this day yet."}
+              </p>
+            )}
+          </div>
 
           <button
             onClick={handleCompleteDay}
             disabled={completingDay}
-            className={`${styles.buttonPrimaryWorkout} w-full py-3 disabled:opacity-50`}          >
+            className={`${styles.buttonPrimaryWorkout} w-full py-3 disabled:opacity-50`}
+          >
             {completingDay ? "Completing..." : "Complete Workout Day"}
           </button>
         </div>

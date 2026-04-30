@@ -37,12 +37,10 @@ type ProgramTemplateExercise = {
 
 type ExerciseLibraryItem = {
   name: string;
-  difficulty: string | null;
   target_muscle: string | null;
+  movement_type: string | null;
   primary_equipment: string | null;
 };
-
-
 
 export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [templateId, setTemplateId] = useState("");
@@ -196,7 +194,9 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     }
 
     setDays((prev) =>
-      prev.map((day) => (day.id === dayId ? { ...day, day_name: dayName } : day))
+      prev.map((day) =>
+        day.id === dayId ? { ...day, day_name: dayName } : day
+      )
     );
   };
 
@@ -267,18 +267,19 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
       return;
     }
 
-    const q = search.trim();
+    const q = search.trim().replace(/[%_,]/g, "");
 
     const { data, error } = await supabase
       .from("exercises")
-      .select("name, difficulty, target_muscle, primary_equipment")
+      .select("name, target_muscle, movement_type, primary_equipment")
       .or(
-        `name.ilike.%${q}%,target_muscle.ilike.%${q}%,primary_equipment.ilike.%${q}%,difficulty.ilike.%${q}%`
+        `name.ilike.%${q}%,target_muscle.ilike.%${q}%,movement_type.ilike.%${q}%,primary_equipment.ilike.%${q}%`
       )
       .order("name", { ascending: true })
       .limit(20);
 
     if (error || !data) {
+      console.error("Exercise search error:", error);
       setExerciseResults((prev) => ({ ...prev, [dayId]: [] }));
       return;
     }
@@ -358,280 +359,291 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
 
     setExercisesByDay((prev) => ({
       ...prev,
-      [dayId]: (prev[dayId] ?? []).filter((exercise) => exercise.id !== exerciseId),
+      [dayId]: (prev[dayId] ?? []).filter(
+        (exercise) => exercise.id !== exerciseId
+      ),
     }));
   };
 
   return (
-<>
+    <>
       <div className="mb-6 flex items-center gap-4">
         <Link href="/trainer/program-templates" className={styles.buttonSecondary}>
           ← Back
         </Link>
-        <h1 className={styles.display}>{template?.name || "Programme Template"}</h1>
+        <h1 className={styles.display}>
+          {template?.name || "Programme Template"}
+        </h1>
       </div>
 
-        {loading ? (
-          <p className={styles.body}>Loading template...</p>
-        ) : !template ? (
-          <p className={styles.body}>Template not found.</p>
-        ) : (
-          <div className="space-y-6">
-            <div className={styles.card}>
-              <h2 className={styles.subheading}>Template Details</h2>
+      {loading ? (
+        <p className={styles.body}>Loading template...</p>
+      ) : !template ? (
+        <p className={styles.body}>Template not found.</p>
+      ) : (
+        <div className="space-y-6">
+          <div className={styles.card}>
+            <h2 className={styles.subheading}>Template Details</h2>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                <div>
-                  <label className="text-sm font-medium text-ink">
-                    Template name
-                  </label>
-                  <input
-                    value={templateName}
-                    onChange={(e) => setTemplateName(e.target.value)}
-                    className={styles.input}
-                  />
-                  <p className="mt-2 text-sm text-ink-muted">
-                    {template.duration_weeks ?? "-"} weeks •{" "}
-                    {template.days_per_week ?? "-"} days per week
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleSaveTemplateName}
-                  disabled={savingTemplate}
-                  className={styles.buttonPrimary}
-                >
-                  {savingTemplate ? "Saving..." : "Save Template"}
-                </button>
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <label className="text-sm font-medium text-ink">
+                  Template name
+                </label>
+                <input
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  className={styles.input}
+                />
+                <p className="mt-2 text-sm text-ink-muted">
+                  {template.duration_weeks ?? "-"} weeks •{" "}
+                  {template.days_per_week ?? "-"} days per week
+                </p>
               </div>
+
+              <button
+                onClick={handleSaveTemplateName}
+                disabled={savingTemplate}
+                className={styles.buttonPrimary}
+              >
+                {savingTemplate ? "Saving..." : "Save Template"}
+              </button>
             </div>
+          </div>
 
-            <div className={styles.card}>
-              <div className="flex flex-col gap-4 md:flex-row md:items-end">
-                <div className="flex-1">
-                  <label className="text-sm font-medium text-ink">
-                    Add new day
-                  </label>
-                  <input
-                    value={newDayName}
-                    onChange={(e) => setNewDayName(e.target.value)}
-                    className={styles.input}
-                    placeholder="e.g. Day 4 / Upper / Push"
-                  />
-                </div>
-
-                <button
-                  onClick={handleAddDay}
-                  disabled={addingDay}
-                  className={styles.buttonPrimary}
-                >
-                  {addingDay ? "Adding..." : "Add Day"}
-                </button>
+          <div className={styles.card}>
+            <div className="flex flex-col gap-4 md:flex-row md:items-end">
+              <div className="flex-1">
+                <label className="text-sm font-medium text-ink">
+                  Add new day
+                </label>
+                <input
+                  value={newDayName}
+                  onChange={(e) => setNewDayName(e.target.value)}
+                  className={styles.input}
+                  placeholder="e.g. Day 4 / Upper / Push"
+                />
               </div>
+
+              <button
+                onClick={handleAddDay}
+                disabled={addingDay}
+                className={styles.buttonPrimary}
+              >
+                {addingDay ? "Adding..." : "Add Day"}
+              </button>
             </div>
+          </div>
 
-            {sortedDays.length === 0 ? (
-              <div className={styles.card}>
-                <p className={styles.body}>No days added yet.</p>
-              </div>
-            ) : (
-              sortedDays.map((day) => {
-                const dayExercises = exercisesByDay[day.id] ?? [];
-                const results = exerciseResults[day.id] ?? [];
+          {sortedDays.length === 0 ? (
+            <div className={styles.card}>
+              <p className={styles.body}>No days added yet.</p>
+            </div>
+          ) : (
+            sortedDays.map((day) => {
+              const dayExercises = exercisesByDay[day.id] ?? [];
+              const results = exerciseResults[day.id] ?? [];
 
-                return (
-                  <div key={day.id} className={styles.card}>
-                    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                      <div className="flex-1">
+              return (
+                <div key={day.id} className={styles.card}>
+                  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-ink">
+                        Day name
+                      </label>
+                      <input
+                        value={day.day_name ?? ""}
+                        onChange={(e) =>
+                          setDays((prev) =>
+                            prev.map((d) =>
+                              d.id === day.id
+                                ? { ...d, day_name: e.target.value }
+                                : d
+                            )
+                          )
+                        }
+                        onBlur={(e) => handleRenameDay(day.id, e.target.value)}
+                        className={styles.input}
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => handleRemoveDay(day.id)}
+                      className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+                    >
+                      Remove Day
+                    </button>
+                  </div>
+
+                  <div className="mt-6 rounded-xl border border-slate-200 p-4">
+                    <h3 className="text-sm font-semibold text-ink">
+                      Add Exercise
+                    </h3>
+
+                    <div className="mt-4 space-y-4">
+                      <div>
                         <label className="text-sm font-medium text-ink">
-                          Day name
+                          Search exercise
                         </label>
                         <input
-                          value={day.day_name ?? ""}
+                          value={exerciseSearch[day.id] ?? ""}
                           onChange={(e) =>
-                            setDays((prev) =>
-                              prev.map((d) =>
-                                d.id === day.id ? { ...d, day_name: e.target.value } : d
-                              )
-                            )
+                            handleSearchExercises(day.id, e.target.value)
                           }
-                          onBlur={(e) => handleRenameDay(day.id, e.target.value)}
                           className={styles.input}
+                          placeholder="Type exercise, muscle, movement type, or equipment..."
                         />
                       </div>
 
-                      <button
-                        onClick={() => handleRemoveDay(day.id)}
-                        className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                      >
-                        Remove Day
-                      </button>
-                    </div>
+                      {results.length > 0 && (
+                        <div className="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2">
+                          {results.map((result) => (
+                            <button
+                              key={result.name}
+                              type="button"
+                              onClick={() =>
+                                handleChooseExercise(day.id, result.name)
+                              }
+                              className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-surface-sunken"
+                            >
+                              <p className="font-medium text-ink">
+                                {result.name}
+                              </p>
+                              <p className="text-sm text-ink-muted">
+                                {result.target_muscle || "—"} •{" "}
+                                {result.movement_type || "—"} •{" "}
+                                {result.primary_equipment || "—"}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
-                    <div className="mt-6 rounded-xl border border-slate-200 p-4">
-                      <h3 className="text-sm font-semibold text-ink">
-                        Add Exercise
-                      </h3>
-
-                      <div className="mt-4 space-y-4">
+                      <div className="grid gap-4 md:grid-cols-4">
                         <div>
                           <label className="text-sm font-medium text-ink">
-                            Search exercise
+                            Selected exercise
                           </label>
                           <input
-                            value={exerciseSearch[day.id] ?? ""}
-                            onChange={(e) =>
-                              handleSearchExercises(day.id, e.target.value)
-                            }
+                            value={selectedExerciseName[day.id] ?? ""}
+                            readOnly
                             className={styles.input}
-                            placeholder="Type exercise, muscle, equipment, or difficulty..."
+                            placeholder="Choose from search above"
                           />
                         </div>
 
-                        {results.length > 0 && (
-                          <div className="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2">
-                            {results.map((result) => (
-                              <button
-                                key={result.name}
-                                type="button"
-                                onClick={() => handleChooseExercise(day.id, result.name)}
-                                className="block w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-surface-sunken"
-                              >
-                                <p className="font-medium text-ink">
-                                  {result.name}
-                                </p>
-                                <p className="text-sm text-ink-muted">
-                                  {result.target_muscle || "—"} •{" "}
-                                  {result.primary_equipment || "—"} •{" "}
-                                  {result.difficulty || "—"}
-                                </p>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="grid gap-4 md:grid-cols-4">
-                          <div>
-                            <label className="text-sm font-medium text-ink">
-                              Selected exercise
-                            </label>
-                            <input
-                              value={selectedExerciseName[day.id] ?? ""}
-                              readOnly
-                              className={styles.input}
-                              placeholder="Choose from search above"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-sm font-medium text-ink">
-                              Sets
-                            </label>
-                            <input
-                              type="number"
-                              value={newExerciseSets[day.id] ?? "3"}
-                              onChange={(e) =>
-                                setNewExerciseSets((prev) => ({
-                                  ...prev,
-                                  [day.id]: e.target.value,
-                                }))
-                              }
-                              className={styles.input}
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-sm font-medium text-ink">
-                              Reps
-                            </label>
-                            <input
-                              value={newExerciseReps[day.id] ?? "10"}
-                              onChange={(e) =>
-                                setNewExerciseReps((prev) => ({
-                                  ...prev,
-                                  [day.id]: e.target.value,
-                                }))
-                              }
-                              className={styles.input}
-                            />
-                          </div>
-
-                          <div>
-                            <label className="text-sm font-medium text-ink">
-                              Target weight (kg)
-                            </label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={newExerciseWeight[day.id] ?? ""}
-                              onChange={(e) =>
-                                setNewExerciseWeight((prev) => ({
-                                  ...prev,
-                                  [day.id]: e.target.value,
-                                }))
-                              }
-                              className={styles.input}
-                              placeholder="Optional"
-                            />
-                          </div>
+                        <div>
+                          <label className="text-sm font-medium text-ink">
+                            Sets
+                          </label>
+                          <input
+                            type="number"
+                            value={newExerciseSets[day.id] ?? "3"}
+                            onChange={(e) =>
+                              setNewExerciseSets((prev) => ({
+                                ...prev,
+                                [day.id]: e.target.value,
+                              }))
+                            }
+                            className={styles.input}
+                          />
                         </div>
 
-                        <button
-                          onClick={() => handleAddExerciseToDay(day.id)}
-                          disabled={addingExerciseForDay[day.id]}
-                          className={styles.buttonPrimary}
-                        >
-                          {addingExerciseForDay[day.id] ? "Adding..." : "Add Exercise"}
-                        </button>
+                        <div>
+                          <label className="text-sm font-medium text-ink">
+                            Reps
+                          </label>
+                          <input
+                            value={newExerciseReps[day.id] ?? "10"}
+                            onChange={(e) =>
+                              setNewExerciseReps((prev) => ({
+                                ...prev,
+                                [day.id]: e.target.value,
+                              }))
+                            }
+                            className={styles.input}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-medium text-ink">
+                            Weight (kg)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={newExerciseWeight[day.id] ?? ""}
+                            onChange={(e) =>
+                              setNewExerciseWeight((prev) => ({
+                                ...prev,
+                                [day.id]: e.target.value,
+                              }))
+                            }
+                            className={styles.input}
+                            placeholder="Optional"
+                          />
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="mt-6">
-                      <h3 className="text-sm font-semibold text-ink">
-                        Exercises
-                      </h3>
-
-                      <div className="mt-3 space-y-2">
-                        {dayExercises.length === 0 ? (
-                          <p className={styles.body}>No exercises added yet.</p>
-                        ) : (
-                          dayExercises.map((exercise) => (
-                            <div
-                              key={exercise.id}
-                              className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 md:flex-row md:items-center md:justify-between"
-                            >
-                              <div>
-                                <p className="font-medium text-ink">
-                                  {exercise.exercise_name}
-                                </p>
-                                <p className="text-sm text-ink-muted">
-                                  {exercise.sets ?? "-"} sets • {exercise.reps ?? "-"} reps
-                                  {exercise.target_weight_kg !== null &&
-                                  exercise.target_weight_kg !== undefined
-                                    ? ` • ${exercise.target_weight_kg} kg`
-                                    : ""}
-                                </p>
-                              </div>
-
-                              <button
-                                onClick={() =>
-                                  handleRemoveExercise(exercise.id, day.id)
-                                }
-                                className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
+                      <button
+                        onClick={() => handleAddExerciseToDay(day.id)}
+                        disabled={addingExerciseForDay[day.id]}
+                        className={styles.buttonPrimary}
+                      >
+                        {addingExerciseForDay[day.id]
+                          ? "Adding..."
+                          : "Add Exercise"}
+                      </button>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        )}
-</>
+
+                  <div className="mt-6">
+                    <h3 className="text-sm font-semibold text-ink">
+                      Exercises
+                    </h3>
+
+                    <div className="mt-3 space-y-2">
+                      {dayExercises.length === 0 ? (
+                        <p className={styles.body}>No exercises added yet.</p>
+                      ) : (
+                        dayExercises.map((exercise) => (
+                          <div
+                            key={exercise.id}
+                            className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 md:flex-row md:items-center md:justify-between"
+                          >
+                            <div>
+                              <p className="font-medium text-ink">
+                                {exercise.exercise_name}
+                              </p>
+                              <p className="text-sm text-ink-muted">
+                                {exercise.sets ?? "-"} sets •{" "}
+                                {exercise.reps ?? "-"} reps
+                                {exercise.target_weight_kg !== null &&
+                                exercise.target_weight_kg !== undefined
+                                  ? ` • ${exercise.target_weight_kg} kg`
+                                  : ""}
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() =>
+                                handleRemoveExercise(exercise.id, day.id)
+                              }
+                              className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </>
   );
 }

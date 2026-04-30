@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { styles } from "@/lib/design";
 
 export default function TrainerGuard({
   children,
@@ -11,68 +10,56 @@ export default function TrainerGuard({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [allowed, setAllowed] = useState(false);
-  const [checking, setChecking] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    const checkTrainer = async () => {
-      try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+    const checkAuth = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-        if (userError || !user) {
-          router.replace("/login");
-          return;
-        }
-
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profileError) {
-          console.error("Trainer guard profile error:", profileError);
-          router.replace("/login");
-          return;
-        }
-
-if (profile?.role !== "trainer") {
-  setChecking(false);
-  setAllowed(false);
-  console.log("Trainer guard blocked:", {
-    userId: user.id,
-    profile,
-    profileError,
-  });
-  return;
-}
-
-        setAllowed(true);
-      } catch (error) {
-        console.error("Trainer guard error:", error);
-        router.replace("/login");
-      } finally {
-        setChecking(false);
+      if (!user) {
+        router.push("/login");
+        return;
       }
+
+      // Check if user is a trainer
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.role !== "trainer") {
+        // User is authenticated but not a trainer
+        setLoading(false);
+        setAuthorized(false);
+        return;
+      }
+
+      setAuthorized(true);
+      setLoading(false);
     };
 
-    checkTrainer();
+    checkAuth();
   }, [router]);
 
-  if (checking) {
+  if (loading) {
     return (
-      <main className={styles.page}>
-        <div className={styles.container}>
-          <p className={styles.body}>Checking trainer access...</p>
-        </div>
-      </main>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-ink-muted">Loading...</p>
+      </div>
     );
   }
 
-  if (!allowed) return null;
+  if (!authorized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-ink-muted">Access denied</p>
+      </div>
+    );
+  }
 
   return <>{children}</>;
 }

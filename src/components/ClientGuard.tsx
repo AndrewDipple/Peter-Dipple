@@ -4,48 +4,55 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type Props = {
-  children: React.ReactNode;
-};
-
-export default function ClientGuard({ children }: Props) {
+export default function ClientGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !user) {
+      if (!user) {
         router.push("/login");
         return;
       }
 
-      // Check if user has client role
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
+      // Check if user is a client
+      const { data: clientData } = await supabase
+        .from("clients")
+        .select("id")
+        .eq("profile_id", user.id)
+        .maybeSingle();
 
-      if (profileError || !profileData || profileData.role !== "client") {
-        router.push("/login");
+      if (!clientData) {
+        // User is authenticated but not a client (probably a trainer)
+        setLoading(false);
+        setAuthorized(false);
         return;
       }
 
       setAuthorized(true);
+      setLoading(false);
     };
 
     checkAuth();
   }, [router]);
 
-  if (!authorized) {
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-ink-muted">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!authorized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-ink-muted">Access denied</p>
       </div>
     );
   }

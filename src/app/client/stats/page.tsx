@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { ChevronRight, Trash2 } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -31,6 +32,15 @@ type ProgressPhoto = {
   image_url: string;
   log_date: string;
   note: string | null;
+  photo_type: "front" | "back" | "side";
+};
+
+type PhotoWeek = {
+  log_date: string;
+  week_number: number;
+  front: ProgressPhoto | null;
+  back: ProgressPhoto | null;
+  side: ProgressPhoto | null;
 };
 
 type MeasurementLog = {
@@ -55,9 +65,13 @@ export default function ClientStatsPage() {
   const [savingWeight, setSavingWeight] = useState(false);
 
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [sideFile, setSideFile] = useState<File | null>(null);
   const [photoNote, setPhotoNote] = useState("");
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [showAllWeeks, setShowAllWeeks] = useState(false);
+  const [deletingWeek, setDeletingWeek] = useState<string | null>(null);
 
   const [latestMeasurements, setLatestMeasurements] = useState<MeasurementLog | null>(null);
   const [measurementLogs, setMeasurementLogs] = useState<MeasurementLog[]>([]);
@@ -90,6 +104,45 @@ export default function ClientStatsPage() {
       date: log.log_date,
       waist: Number(log.waist_cm),
     }));
+
+  // Group photos into weeks
+  const photoWeeks = useMemo(() => {
+    const grouped = photos.reduce((acc, photo) => {
+      if (!acc[photo.log_date]) {
+        acc[photo.log_date] = {
+          log_date: photo.log_date,
+          week_number: 0,
+          front: null,
+          back: null,
+          side: null,
+        };
+      }
+      acc[photo.log_date][photo.photo_type] = photo;
+      return acc;
+    }, {} as Record<string, PhotoWeek>);
+
+    const weeks = Object.values(grouped).sort((a, b) =>
+      a.log_date.localeCompare(b.log_date)
+    );
+
+    // Assign week numbers
+    weeks.forEach((week, index) => {
+      week.week_number = index + 1;
+    });
+
+    return weeks;
+  }, [photos]);
+
+  const displayWeeks = useMemo(() => {
+    if (photoWeeks.length === 0) return [];
+    if (photoWeeks.length === 1) return photoWeeks;
+    if (showAllWeeks) return photoWeeks;
+
+    // Show first and last only
+    return [photoWeeks[0], photoWeeks[photoWeeks.length - 1]];
+  }, [photoWeeks, showAllWeeks]);
+
+  const hasMiddleWeeks = photoWeeks.length > 2;
 
   const loadStats = async () => {
     setLoading(true);
@@ -151,8 +204,7 @@ export default function ClientStatsPage() {
       .from("progress_photos")
       .select("*")
       .eq("client_id", clientData.id)
-      .order("log_date", { ascending: false })
-      .limit(24);
+      .order("log_date", { ascending: true });
 
     if (photoData) {
       setPhotos(photoData);
@@ -162,11 +214,6 @@ export default function ClientStatsPage() {
 
     setLoading(false);
   };
-
-const [chartsReady, setChartsReady] = useState(false);
-useEffect(() => {
-  setChartsReady(true);
-}, []);
 
   useEffect(() => {
     loadStats();
@@ -238,54 +285,105 @@ useEffect(() => {
     await loadStats();
   };
 
-  const handleUploadPhoto = async () => {
-    if (!client || !photoFile) return;
-
-    setUploadingPhoto(true);
-
-    const fileExt = photoFile.name.split(".").pop();
-    const filePath = `${client.id}/${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("progress-photos")
-      .upload(filePath, photoFile);
-
-    if (uploadError) {
-      alert(`Error uploading photo: ${uploadError.message}`);
-      setUploadingPhoto(false);
+  const handleUploadPhotos = async () => {
+    if (!client || !frontFile || !backFile || !sideFile) {
+      alert("Please select all 3 photos (Front, Back, Side)");
       return;
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from("progress-photos")
-      .getPublicUrl(filePath);
+    setUploadingPhotos(true);
 
-    const imageUrl = publicUrlData.publicUrl;
+    try {
+      const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
+        { type: "front", file: frontFile },
+        { type: "back", file: backFile },
+        { type: "side", file: sideFile },
+      ];
 
-    const { error } = await supabase
-      .from("progress_photos")
-      .insert([
-        {
-          client_id: client.id,
-          image_url: imageUrl,
-          log_date: today,
-          note: photoNote || null,
-        },
-      ]);
+      for (const { type, file } of uploads) {
+        const fileExt = file.name.split(".").pop();
+        const filePath = `${client.id}/${today}-${type}-${Date.now()}.${fileExt}`;
 
-    if (error) {
-      alert("Error saving photo record");
-      setUploadingPhoto(false);
-      return;
+        const { error: uploadError } = await supabase.storage
+          .from("progress-photos")
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage
+          .from("progress-photos")
+          .getPublicUrl(filePath);
+
+        const imageUrl = publicUrlData.publicUrl;
+
+        const { error: dbError } = await supabase
+          .from("progress_photos")
+          .insert([
+            {
+              client_id: client.id,
+              image_url: imageUrl,
+              log_date: today,
+              photo_type: type,
+              note: photoNote || null,
+            },
+          ]);
+
+        if (dbError) throw dbError;
+      }
+
+      setFrontFile(null);
+      setBackFile(null);
+      setSideFile(null);
+      setPhotoNote("");
+      alert("Photos uploaded successfully!");
+      await loadStats();
+    } catch (error: any) {
+      alert(`Error uploading photos: ${error.message}`);
+    } finally {
+      setUploadingPhotos(false);
     }
-
-    setPhotoFile(null);
-    setPhotoNote("");
-    setUploadingPhoto(false);
-    await loadStats();
   };
 
-return (
+  const handleDeleteWeek = async (log_date: string) => {
+    if (!client) return;
+
+    const confirmed = window.confirm(
+      "Delete all 3 photos from this week? This cannot be undone."
+    );
+    if (!confirmed) return;
+
+    setDeletingWeek(log_date);
+
+    // Get all photos for this date
+    const photosToDelete = photos.filter((p) => p.log_date === log_date);
+
+    try {
+      // Delete from storage
+      for (const photo of photosToDelete) {
+        const path = photo.image_url.split("/progress-photos/")[1];
+        if (path) {
+          await supabase.storage.from("progress-photos").remove([path]);
+        }
+      }
+
+      // Delete from database
+      const { error } = await supabase
+        .from("progress_photos")
+        .delete()
+        .eq("client_id", client.id)
+        .eq("log_date", log_date);
+
+      if (error) throw error;
+
+      await loadStats();
+    } catch (error: any) {
+      alert(`Error deleting photos: ${error.message}`);
+    } finally {
+      setDeletingWeek(null);
+    }
+  };
+
+  return (
     <>
       <h1 className={styles.display}>My Stats</h1>
 
@@ -517,63 +615,212 @@ return (
 
           <div className={styles.card}>
             <h2 className={styles.h2}>Progress Photos</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Upload Front, Back, and Side photos together as a weekly set
+            </p>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-              <div>
-                <label className="text-sm font-medium text-ink">
-                  Upload photo
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                  className={`${styles.input} pt-2`}
-                />
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <label className="text-sm font-medium text-ink">Front Photo</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setFrontFile(e.target.files?.[0] || null)}
+                    className={`${styles.input} pt-2`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">Back Photo</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setBackFile(e.target.files?.[0] || null)}
+                    className={`${styles.input} pt-2`}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">Side Photo</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setSideFile(e.target.files?.[0] || null)}
+                    className={`${styles.input} pt-2`}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="text-sm font-medium text-ink">Note</label>
+              <div className="flex gap-2">
                 <input
                   type="text"
                   value={photoNote}
                   onChange={(e) => setPhotoNote(e.target.value)}
-                  className={styles.input}
-                  placeholder="Optional note"
+                  className={`${styles.input} flex-1`}
+                  placeholder="Optional note (e.g., Week 1)"
                 />
+                <button
+                  onClick={handleUploadPhotos}
+                  disabled={uploadingPhotos || !frontFile || !backFile || !sideFile}
+                  className={`${styles.buttonPrimaryStats} disabled:opacity-50`}
+                >
+                  {uploadingPhotos ? "Uploading..." : "Upload All 3"}
+                </button>
+              </div>
+            </div>
+
+{photoWeeks.length === 0 ? (
+  <p className={`${styles.body} mt-6`}>
+    No progress photos yet. Upload your first set!
+  </p>
+) : (
+  <div className="mt-6">
+    {/* Photo comparison rows */}
+    <div className="space-y-6">
+      {/* Front Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Front</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`front-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.front ? (
+                  <img
+                    src={week.front.image_url}
+                    alt="Front"
+                    className="h-48 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
               </div>
 
+              {/* Arrow between first and last */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <button
+                  onClick={() => setShowAllWeeks(true)}
+                  className="flex flex-col items-center gap-1 px-4 text-gold hover:opacity-80"
+                  title="Show all weeks"
+                >
+                  <ChevronRight size={32} />
+                  <span className="text-xs font-medium">
+                    {photoWeeks.length - 2} week{photoWeeks.length - 2 !== 1 ? "s" : ""}
+                  </span>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Back Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Back</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`back-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.back ? (
+                  <img
+                    src={week.back.image_url}
+                    alt="Back"
+                    className="h-48 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow (invisible spacer to maintain alignment) */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <div className="w-20" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Side Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Side</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`side-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.side ? (
+                  <img
+                    src={week.side.image_url}
+                    alt="Side"
+                    className="h-48 w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow (invisible spacer to maintain alignment) */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <div className="w-20" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Delete buttons row */}
+      <div className="flex items-center gap-4">
+        {displayWeeks.map((week, index) => (
+          <div key={`delete-${week.log_date}`} className="flex items-center gap-4">
+            <div className="flex-1">
               <button
-                onClick={handleUploadPhoto}
-                disabled={uploadingPhoto || !photoFile}
-                className={styles.buttonPrimaryStats}
+                onClick={() => handleDeleteWeek(week.log_date)}
+                disabled={deletingWeek === week.log_date}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
+                title="Delete this week"
               >
-                {uploadingPhoto ? "Uploading..." : "Upload"}
+                <Trash2 size={16} />
+                Delete Week {week.week_number}
               </button>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {photos.length === 0 ? (
-                <p className={styles.body}>No progress photos yet.</p>
-              ) : (
-                photos.map((photo) => (
-                  <div key={photo.id} className={`${styles.card} p-3`}>
-                    <img
-                      src={photo.image_url}
-                      alt="Progress"
-                      className="h-56 w-full rounded-xl object-cover"
-                    />
-                    <p className="mt-2 text-sm font-medium text-ink">
-                      {photo.log_date}
-                    </p>
-                    {photo.note && (
-                      <p className="mt-1 text-sm text-ink-muted">
-                        {photo.note}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+            {/* Arrow spacer */}
+            {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+              <div className="w-20" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {showAllWeeks && hasMiddleWeeks && (
+      <button
+        onClick={() => setShowAllWeeks(false)}
+        className="mt-4 text-sm text-gold hover:underline"
+      >
+        Show only first and latest
+      </button>
+    )}
+  </div>
+)}
           </div>
         </div>
       )}

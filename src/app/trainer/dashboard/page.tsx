@@ -11,6 +11,8 @@ type Client = {
   email: string;
   calorie_target: number | null;
   daily_step_target: number;
+  profile_id: string | null;
+  last_sign_in_at: string | null;
 };
 
 type WorkoutSetLog = {
@@ -89,13 +91,43 @@ export default function TrainerDashboardPage() {
     });
   }, [selectedDate]);
 
+  const getDaysSinceLogin = (lastSignIn: string | null) => {
+    if (!lastSignIn) return null;
+
+    const now = new Date();
+    const lastLogin = new Date(lastSignIn);
+    const diffMs = now.getTime() - lastLogin.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    return diffDays;
+  };
+
+  const getLastActiveText = (lastSignIn: string | null) => {
+    const days = getDaysSinceLogin(lastSignIn);
+
+    if (days === null) return "Never logged in";
+    if (days === 0) return "Active today";
+    if (days === 1) return "1 day ago";
+    return `${days} days ago`;
+  };
+
+  const getLastActiveColor = (lastSignIn: string | null) => {
+    const days = getDaysSinceLogin(lastSignIn);
+
+    if (days === null) return "text-red-600";
+    if (days === 0) return "text-green-600";
+    if (days <= 3) return "text-green-600";
+    if (days <= 7) return "text-amber-600";
+    return "text-red-600"; // 8+ days
+  };
+
   useEffect(() => {
     const loadDashboard = async () => {
       setLoading(true);
 
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
-        .select("id, full_name, email, calorie_target, daily_step_target")
+        .select("id, full_name, email, calorie_target, daily_step_target, profile_id")
         .order("full_name", { ascending: true });
 
       if (clientsError || !clientsData) {
@@ -104,7 +136,28 @@ export default function TrainerDashboardPage() {
         return;
       }
 
-      const clients = clientsData as Client[];
+      // Get auth data for all clients
+      const clientsWithAuth = await Promise.all(
+        clientsData.map(async (client) => {
+          if (!client.profile_id) {
+            return { ...client, last_sign_in_at: null };
+          }
+
+          // Get last sign in from auth.users via profiles
+          const { data: authData } = await supabase
+            .from("profiles")
+            .select("last_sign_in_at")
+            .eq("id", client.profile_id)
+            .single();
+
+          return {
+            ...client,
+            last_sign_in_at: authData?.last_sign_in_at || null,
+          };
+        })
+      );
+
+      const clients = clientsWithAuth as Client[];
       const clientIds = clients.map((client) => client.id);
 
       let setLogs: WorkoutSetLog[] = [];
@@ -344,6 +397,9 @@ export default function TrainerDashboardPage() {
                     </h2>
                     <p className="mt-1 text-sm text-ink-muted">
                       {card.client.email}
+                    </p>
+                    <p className={`mt-1 text-xs font-medium ${getLastActiveColor(card.client.last_sign_in_at)}`}>
+                      Last active: {getLastActiveText(card.client.last_sign_in_at)}
                     </p>
                   </div>
 

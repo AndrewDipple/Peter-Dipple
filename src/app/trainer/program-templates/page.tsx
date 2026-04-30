@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 
@@ -12,11 +13,11 @@ type ProgramTemplate = {
   days_per_week: number | null;
 };
 
-
-
 export default function TrainerProgramTemplatesPage() {
+  const router = useRouter();
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const loadTemplates = async () => {
@@ -36,15 +37,52 @@ export default function TrainerProgramTemplatesPage() {
     loadTemplates();
   }, []);
 
-return (
+  const handleCreateTemplate = async () => {
+    setCreating(true);
+
+    const { data, error } = await supabase
+      .from("program_templates")
+      .insert([
+        {
+          name: "New Programme Template",
+          duration_weeks: 4,
+          days_per_week: 3,
+        },
+      ])
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Error creating template");
+      setCreating(false);
+      return;
+    }
+
+    router.push(`/trainer/program-templates/${data.id}`);
+  };
+
+  return (
     <>
-      <h1 className={styles.display}>Programme Templates</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className={styles.display}>Programme Templates</h1>
+        <button
+          onClick={handleCreateTemplate}
+          disabled={creating}
+          className={styles.buttonPrimary}
+        >
+          {creating ? "Creating..." : "Create New Template"}
+        </button>
+      </div>
 
       <div className="mt-6 space-y-3">
         {loading ? (
           <p className={styles.body}>Loading templates...</p>
         ) : templates.length === 0 ? (
-          <p className={styles.body}>No templates yet.</p>
+          <div className={styles.card}>
+            <p className={styles.body}>
+              No templates yet. Click "Create New Template" to get started.
+            </p>
+          </div>
         ) : (
           templates.map((template) => (
             <Link

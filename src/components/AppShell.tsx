@@ -13,8 +13,12 @@ import {
   ChefHat,
   ClipboardList,
   LogOut,
+  MessageSquare,
 } from "lucide-react";
 import Logo from "./Logo";
+import { styles } from "@/lib/design";
+import NotificationBell from "./NotificationBell";
+
 
 type NavItem = {
   href: string;
@@ -35,6 +39,7 @@ const trainerNav: NavItem[] = [
     label: "Programmes",
     icon: ClipboardList,
   },
+  { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 }, // ADD THIS
 ];
 
 const clientNav: NavItem[] = [
@@ -61,6 +66,12 @@ export default function AppShell({ userType, children }: Props) {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [displayName, setDisplayName] = useState<string>("");
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<"bug" | "feature">("bug");
+  const [feedbackTitle, setFeedbackTitle] = useState("");
+  const [feedbackDescription, setFeedbackDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close avatar menu on outside click
@@ -121,6 +132,48 @@ export default function AppShell({ userType, children }: Props) {
     router.push("/login");
   };
 
+  const handleOpenFeedback = () => {
+    setMenuOpen(false);
+    setFeedbackModalOpen(true);
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!feedbackTitle.trim() || !feedbackDescription.trim()) {
+      alert("Please fill in all fields");
+      return;
+    }
+
+    setSubmitting(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from("feedback").insert([
+      {
+        user_id: user?.id || null,
+        user_name: displayName || "Anonymous",
+        type: feedbackType,
+        title: feedbackTitle.trim(),
+        description: feedbackDescription.trim(),
+        page_url: window.location.href,
+      },
+    ]);
+
+    if (error) {
+      alert("Error submitting feedback. Please try again.");
+      setSubmitting(false);
+      return;
+    }
+
+    alert("Thank you for your feedback!");
+    setFeedbackModalOpen(false);
+    setFeedbackTitle("");
+    setFeedbackDescription("");
+    setFeedbackType("bug");
+    setSubmitting(false);
+  };
+
   return (
     <>
       {/* Sticky banner */}
@@ -159,6 +212,12 @@ export default function AppShell({ userType, children }: Props) {
             })}
           </nav>
 
+<NotificationBell />
+
+<div ref={menuRef} className="relative shrink-0">
+  {/* existing avatar code */}
+</div>
+
           {/* User avatar dropdown */}
           <div ref={menuRef} className="relative shrink-0">
             <button
@@ -180,6 +239,14 @@ export default function AppShell({ userType, children }: Props) {
               <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-md bg-surface-raised text-ink shadow-lifted">
                 <button
                   type="button"
+                  onClick={handleOpenFeedback}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-surface-sunken"
+                >
+                  <MessageSquare size={16} />
+                  Report Bug / Request
+                </button>
+                <button
+                  type="button"
                   onClick={handleLogout}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-surface-sunken"
                 >
@@ -198,6 +265,72 @@ export default function AppShell({ userType, children }: Props) {
           {children}
         </div>
       </main>
+
+      {/* Feedback Modal */}
+      {feedbackModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+          <div className={`${styles.card} w-full max-w-lg`}>
+            <h2 className={styles.h2}>Report Bug / Request Feature</h2>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-ink">Type</label>
+                <select
+                  value={feedbackType}
+                  onChange={(e) => setFeedbackType(e.target.value as "bug" | "feature")}
+                  className={styles.input}
+                >
+                  <option value="bug">Bug Report</option>
+                  <option value="feature">Feature Request</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">Title</label>
+                <input
+                  type="text"
+                  value={feedbackTitle}
+                  onChange={(e) => setFeedbackTitle(e.target.value)}
+                  placeholder="Brief summary"
+                  className={styles.input}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-ink">Description</label>
+                <textarea
+                  value={feedbackDescription}
+                  onChange={(e) => setFeedbackDescription(e.target.value)}
+                  placeholder="Provide details..."
+                  rows={6}
+                  className={styles.input}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSubmitFeedback}
+                  disabled={submitting}
+                  className={`${styles.buttonPrimary} flex-1 disabled:opacity-50`}
+                >
+                  {submitting ? "Submitting..." : "Submit"}
+                </button>
+                <button
+                  onClick={() => {
+                    setFeedbackModalOpen(false);
+                    setFeedbackTitle("");
+                    setFeedbackDescription("");
+                    setFeedbackType("bug");
+                  }}
+                  className={`${styles.buttonSecondary} flex-1`}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

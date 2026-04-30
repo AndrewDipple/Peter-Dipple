@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { notifyProgramAssigned } from "@/components/notifications";
 import { styles } from "@/lib/design";
 import Link from "next/link";
 import {
@@ -41,6 +42,9 @@ type MealLog = {
   recipes: {
     name: string;
     calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
   } | null;
 };
 
@@ -129,6 +133,13 @@ type DailyTracking = {
   steps_logged: number | null;
 };
 
+type MacroTotals = {
+  protein: number;
+  carbs: number;
+  fat: number;
+  calories: number;
+};
+
 type PageProps = {
   params: Promise<{
     id: string;
@@ -143,6 +154,23 @@ function shiftDate(dateStr: string, days: number) {
   const date = new Date(`${dateStr}T12:00:00`);
   date.setDate(date.getDate() + days);
   return getDateString(date);
+}
+
+function getWeekDates(dateStr: string): { start: string; end: string } {
+  const date = new Date(`${dateStr}T12:00:00`);
+  const dayOfWeek = date.getDay();
+  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Monday = 1
+  
+  const monday = new Date(date);
+  monday.setDate(date.getDate() + diff);
+  
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  
+  return {
+    start: getDateString(monday),
+    end: getDateString(sunday),
+  };
 }
 
 function getStatusClasses(status: "green" | "amber" | "red") {
@@ -173,6 +201,18 @@ export default function ClientDetailPage({ params }: PageProps) {
   const [mealLogs, setMealLogs] = useState<MealLog[]>([]);
   const [customMealLogs, setCustomMealLogs] = useState<CustomMealLog[]>([]);
   const [todayCalories, setTodayCalories] = useState(0);
+  const [dailyMacros, setDailyMacros] = useState<MacroTotals>({
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    calories: 0,
+  });
+  const [weeklyMacros, setWeeklyMacros] = useState<MacroTotals>({
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    calories: 0,
+  });
   const [dailyTracking, setDailyTracking] = useState<DailyTracking | null>(null);
 
   const [latestWeight, setLatestWeight] = useState<WeightLog | null>(null);
@@ -193,6 +233,20 @@ export default function ClientDetailPage({ params }: PageProps) {
       year: "numeric",
     });
   }, [selectedDate]);
+
+  const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+
+  const readableWeek = useMemo(() => {
+    const start = new Date(`${weekDates.start}T12:00:00`).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    });
+    const end = new Date(`${weekDates.end}T12:00:00`).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    });
+    return `${start} - ${end}`;
+  }, [weekDates]);
 
   const weightChartData = [...weightLogs]
     .sort((a, b) => a.log_date.localeCompare(b.log_date))
@@ -309,7 +363,7 @@ export default function ClientDetailPage({ params }: PageProps) {
         .from("progress_photos")
         .select("*")
         .eq("client_id", id)
-        .order("log_date", { ascending: false })
+        .order("log_date", { ascending: false})
         .limit(24);
 
       setProgressPhotos(photoData ?? []);
@@ -358,6 +412,7 @@ export default function ClientDetailPage({ params }: PageProps) {
       setMealLogs([]);
       setCustomMealLogs([]);
       setTodayCalories(0);
+      setDailyMacros({ protein: 0, carbs: 0, fat: 0, calories: 0 });
       setSetLogs([]);
       setDayExercises([]);
       setReviewedDayId(null);
@@ -375,15 +430,18 @@ export default function ClientDetailPage({ params }: PageProps) {
         setDailyTracking(trackingData);
       }
 
-      let recipeCaloriesTotal = 0;
-      let customCaloriesTotal = 0;
-
+      // Load daily meal data with macros
       const { data: mealData } = await supabase
         .from("meal_logs")
-        .select("id, recipe_id, completed, quantity, recipes(name, calories)")
+        .select("id, recipe_id, completed, quantity, recipes(name, calories, protein_g, carbs_g, fat_g)")
         .eq("client_id", clientId)
         .eq("log_date", selectedDate)
         .eq("completed", true);
+
+      let dailyProtein = 0;
+      let dailyCarbs = 0;
+      let dailyFat = 0;
+      let dailyCalories = 0;
 
       if (mealData) {
         const normalizedMealLogs: MealLog[] = mealData.map((item: any) => {
@@ -397,17 +455,26 @@ export default function ClientDetailPage({ params }: PageProps) {
             completed: item.completed,
             quantity: item.quantity ?? 1,
             recipes: recipeData
-              ? { name: recipeData.name ?? "", calories: recipeData.calories ?? null }
+              ? {
+                  name: recipeData.name ?? "",
+                  calories: recipeData.calories ?? null,
+                  protein_g: recipeData.protein_g ?? null,
+                  carbs_g: recipeData.carbs_g ?? null,
+                  fat_g: recipeData.fat_g ?? null,
+                }
               : null,
           };
         });
 
         setMealLogs(normalizedMealLogs);
 
-        recipeCaloriesTotal = normalizedMealLogs.reduce((sum, item) => {
-          const quantity = item.quantity ?? 1;
-          return sum + (item.recipes?.calories ?? 0) * quantity;
-        }, 0);
+        normalizedMealLogs.forEach((meal) => {
+          const quantity = meal.quantity ?? 1;
+          dailyCalories += (meal.recipes?.calories ?? 0) * quantity;
+          dailyProtein += (meal.recipes?.protein_g ?? 0) * quantity;
+          dailyCarbs += (meal.recipes?.carbs_g ?? 0) * quantity;
+          dailyFat += (meal.recipes?.fat_g ?? 0) * quantity;
+        });
       }
 
       const { data: customMealData } = await supabase
@@ -419,13 +486,71 @@ export default function ClientDetailPage({ params }: PageProps) {
 
       if (customMealData) {
         setCustomMealLogs(customMealData);
-        customCaloriesTotal = customMealData.reduce(
+        dailyCalories += customMealData.reduce(
           (sum, meal) => sum + (meal.calories ?? 0),
           0
         );
       }
 
-      setTodayCalories(recipeCaloriesTotal + customCaloriesTotal);
+      setTodayCalories(dailyCalories);
+      setDailyMacros({
+        protein: Math.round(dailyProtein),
+        carbs: Math.round(dailyCarbs),
+        fat: Math.round(dailyFat),
+        calories: dailyCalories,
+      });
+
+      // Load weekly meal data
+      const { data: weeklyMealData } = await supabase
+        .from("meal_logs")
+        .select("id, recipe_id, completed, quantity, recipes(name, calories, protein_g, carbs_g, fat_g)")
+        .eq("client_id", clientId)
+        .gte("log_date", weekDates.start)
+        .lte("log_date", weekDates.end)
+        .eq("completed", true);
+
+      let weeklyProtein = 0;
+      let weeklyCarbs = 0;
+      let weeklyFat = 0;
+      let weeklyCalories = 0;
+
+      if (weeklyMealData) {
+        weeklyMealData.forEach((item: any) => {
+          const recipeData = Array.isArray(item.recipes)
+            ? item.recipes[0] ?? null
+            : item.recipes ?? null;
+          
+          const quantity = item.quantity ?? 1;
+          
+          if (recipeData) {
+            weeklyCalories += (recipeData.calories ?? 0) * quantity;
+            weeklyProtein += (recipeData.protein_g ?? 0) * quantity;
+            weeklyCarbs += (recipeData.carbs_g ?? 0) * quantity;
+            weeklyFat += (recipeData.fat_g ?? 0) * quantity;
+          }
+        });
+      }
+
+      const { data: weeklyCustomMealData } = await supabase
+        .from("custom_meal_logs")
+        .select("*")
+        .eq("client_id", clientId)
+        .gte("log_date", weekDates.start)
+        .lte("log_date", weekDates.end);
+
+      if (weeklyCustomMealData) {
+        weeklyCalories += weeklyCustomMealData.reduce(
+          (sum, meal) => sum + (meal.calories ?? 0),
+          0
+        );
+      }
+
+      setWeeklyMacros({
+        protein: Math.round(weeklyProtein),
+        carbs: Math.round(weeklyCarbs),
+        fat: Math.round(weeklyFat),
+        calories: weeklyCalories,
+      });
 
       if (!clientProgram) return;
 
@@ -477,7 +602,7 @@ export default function ClientDetailPage({ params }: PageProps) {
     };
 
     loadDateData();
-  }, [selectedDate, clientId, clientProgram, programDays]);
+  }, [selectedDate, clientId, clientProgram, programDays, weekDates]);
 
   const handleAssignTemplate = async () => {
     if (!clientId || !selectedTemplateId) {
@@ -583,16 +708,25 @@ export default function ClientDetailPage({ params }: PageProps) {
       }
     }
 
-    const { data: refreshedDays } = await supabase
-      .from("client_program_days")
-      .select("*")
-      .eq("client_program_id", newProgram.id)
-      .order("sort_order", { ascending: true });
+const { data: refreshedDays } = await supabase
+  .from("client_program_days")
+  .select("*")
+  .eq("client_program_id", newProgram.id)
+  .order("sort_order", { ascending: true });
 
-    setProgramDays(refreshedDays ?? []);
-    alert("Template assigned!");
-    setClientProgram(newProgram);
-    setAssigningTemplate(false);
+setProgramDays(refreshedDays ?? []);
+
+// 🔔 Send notification to client
+if (client) {
+  const template = templates.find((t) => t.id === selectedTemplateId);
+  if (template) {
+await notifyProgramAssigned(clientId, client.full_name, template.name);
+  }
+}
+
+alert("Template assigned!");
+setClientProgram(newProgram);
+setAssigningTemplate(false);
   };
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
@@ -893,6 +1027,87 @@ export default function ClientDetailPage({ params }: PageProps) {
                   <p className="mt-1 text-sm font-semibold">{nutritionStatus.label}</p>
                 </div>
 
+                {/* Daily Macros Card */}
+                <div className="rounded-xl border border-emerald/20 bg-surface-raised p-4">
+                  <h4 className="font-semibold text-ink">Daily Macros</h4>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Protein
+                      </p>
+                      <p className="mt-1 text-2xl font-bold text-emerald">
+                        {dailyMacros.protein}g
+                      </p>
+                      {client.protein_g && (
+                        <p className="text-xs text-ink-muted">Target: {client.protein_g}g</p>
+                      )}
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Carbs
+                      </p>
+                      <p className="mt-1 text-2xl font-bold text-emerald">
+                        {dailyMacros.carbs}g
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Fat
+                      </p>
+                      <p className="mt-1 text-2xl font-bold text-emerald">
+                        {dailyMacros.fat}g
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Weekly Macros Card */}
+                <div className="rounded-xl border border-emerald/20 bg-surface-raised p-4">
+                  <div className="flex items-baseline gap-2">
+                    <h4 className="font-semibold text-ink">Weekly Macros</h4>
+                    <p className="text-xs text-ink-muted">{readableWeek}</p>
+                  </div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Calories
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-emerald">
+                        {weeklyMacros.calories}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Protein
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-emerald">
+                        {weeklyMacros.protein}g
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Carbs
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-emerald">
+                        {weeklyMacros.carbs}g
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Fat
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-emerald">
+                        {weeklyMacros.fat}g
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Water Card */}
                 <div className="rounded-xl border border-emerald/20 bg-surface-raised p-4">
                   <div className="flex items-center justify-between">
@@ -903,13 +1118,6 @@ export default function ClientDetailPage({ params }: PageProps) {
                       </p>
                     </div>
                   </div>
-                </div>
-
-                <div className={styles.card}>
-                  <h4 className="font-semibold text-ink">Total Calories</h4>
-                  <p className="mt-2 text-2xl font-bold text-ink">
-                    {todayCalories} kcal
-                  </p>
                 </div>
 
                 <div className={styles.card}>

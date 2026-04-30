@@ -31,6 +31,7 @@ function getRecipeTags(recipe: Recipe) {
 export default function TrainerRecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [showVegetarian, setShowVegetarian] = useState(false);
   const [showVegan, setShowVegan] = useState(false);
@@ -57,22 +58,49 @@ export default function TrainerRecipesPage() {
   }, []);
 
   const filteredRecipes = useMemo(() => {
-    return recipes.filter((recipe) => {
+    let filtered = recipes;
+
+    // Apply dietary filters
+    filtered = filtered.filter((recipe) => {
       if (showVegetarian && !recipe.is_vegetarian) return false;
       if (showVegan && !recipe.is_vegan) return false;
       if (showDairyFree && !recipe.is_dairy_free) return false;
       if (showGlutenFree && !recipe.is_gluten_free) return false;
       return true;
     });
-  }, [recipes, showVegetarian, showVegan, showDairyFree, showGlutenFree]);
 
-return (
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((recipe) => {
+        const name = recipe.name?.toLowerCase() || "";
+        const description = recipe.description?.toLowerCase() || "";
+        const tags = getRecipeTags(recipe).join(" ").toLowerCase();
+        return name.includes(query) || description.includes(query) || tags.includes(query);
+      });
+    }
+
+    return filtered;
+  }, [recipes, searchQuery, showVegetarian, showVegan, showDairyFree, showGlutenFree]);
+
+  return (
     <>
       <div className="mb-6 flex items-center justify-between">
         <h1 className={styles.display}>Recipes</h1>
         <Link href="/trainer/recipes/new" className={styles.buttonPrimary}>
           Add Recipe
         </Link>
+      </div>
+
+      {/* Search Box */}
+      <div className="mb-6">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search recipes by name, description, or tags..."
+          className={styles.input}
+        />
       </div>
 
       <div className={styles.card}>

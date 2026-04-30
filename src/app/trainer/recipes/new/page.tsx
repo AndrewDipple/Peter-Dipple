@@ -301,17 +301,7 @@ return (
           </div>
         </div>
 
-        <div className={styles.card}>
-          <div className="flex items-center justify-between">
-            <h2 className={styles.h2}>Ingredients</h2>
-            <button
-              type="button"
-              onClick={addIngredientRow}
-              className={styles.buttonSecondary}
-            >
-              Add Ingredient
-            </button>
-          </div>
+
 
           <div className="mt-4 space-y-3">
             {ingredients.map((row, index) => (
@@ -392,6 +382,17 @@ return (
                 </div>
               </div>
             ))}
+                  <div className={styles.card}>
+          <div className="flex items-center justify-between">
+            <h2 className={styles.h2}>Ingredients</h2>
+            <button
+              type="button"
+              onClick={addIngredientRow}
+              className={styles.buttonSecondary}
+            >
+              Add Ingredient
+            </button>
+          </div>
           </div>
         </div>
 
