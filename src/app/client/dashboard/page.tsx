@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { X } from "lucide-react";
+import { updateStreak } from "@/lib/streaks";
+import StreakDisplay from "@/components/StreakDisplay";
+import { checkStreakReminders } from "@/lib/streaks";
+import Leaderboard from "@/components/Leaderboard";
 
 type Client = {
   id: string;
@@ -194,17 +198,33 @@ export default function ClientDashboardPage() {
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      setClient(null);
-      setLoading(false);
-      return;
-    }
+if (userError || !user) {
+  setClient(null);
+  setLoading(false);
+  return;
+}
 
-    const { data: clientData, error: clientError } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("profile_id", user.id)
-      .single();
+const { data: clientData, error: clientError } = await supabase
+  .from("clients")
+  .select("*")
+  .eq("profile_id", user.id)
+  .single();
+
+if (clientError || !clientData) {
+  setClient(null);
+  setLoading(false);
+  return;
+}
+
+if (clientData.onboarding_complete === false) {
+  window.location.href = "/onboarding";
+  return;
+}
+
+setClient(clientData);
+
+// ✅ Check for streak reminders AFTER clientData is loaded
+await checkStreakReminders(clientData.id);
 
     if (clientError || !clientData) {
       setClient(null);
@@ -419,49 +439,54 @@ export default function ClientDashboardPage() {
     setSavingSteps(false);
   };
 
-  const handleToggleWater = async () => {
-    if (!client) return;
+const handleToggleWater = async () => {
+  if (!client) return;
 
-    setTogglingWater(true);
+  setTogglingWater(true);
 
-    const newWaterStatus = !dailyTracking?.water_completed;
+  const newWaterStatus = !dailyTracking?.water_completed;
 
-    if (dailyTracking) {
-      const { error } = await supabase
-        .from("daily_tracking")
-        .update({ water_completed: newWaterStatus })
-        .eq("id", dailyTracking.id);
+  if (dailyTracking) {
+    const { error } = await supabase
+      .from("daily_tracking")
+      .update({ water_completed: newWaterStatus })
+      .eq("id", dailyTracking.id);
 
-      if (error) {
-        alert("Error updating water");
-        setTogglingWater(false);
-        return;
-      }
-
-      setDailyTracking({ ...dailyTracking, water_completed: newWaterStatus });
-    } else {
-      const { data, error } = await supabase
-        .from("daily_tracking")
-        .insert({
-          client_id: client.id,
-          log_date: today,
-          water_completed: newWaterStatus,
-          steps_logged: null,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        alert("Error updating water");
-        setTogglingWater(false);
-        return;
-      }
-
-      setDailyTracking(data);
+    if (error) {
+      alert("Error updating water");
+      setTogglingWater(false);
+      return;
     }
 
-    setTogglingWater(false);
-  };
+    setDailyTracking({ ...dailyTracking, water_completed: newWaterStatus });
+  } else {
+    const { data, error } = await supabase
+      .from("daily_tracking")
+      .insert({
+        client_id: client.id,
+        log_date: today,
+        water_completed: newWaterStatus,
+        steps_logged: null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      alert("Error updating water");
+      setTogglingWater(false);
+      return;
+    }
+
+    setDailyTracking(data);
+  }
+
+  // 🔥 UPDATE WATER STREAK
+  if (newWaterStatus) {
+    await updateStreak(client.id, "water", today);
+  }
+
+  setTogglingWater(false);
+};
 
   const handleSubmitMilestone = async () => {
     if (!client || !clientMilestone || !milestoneConfig) return;
@@ -570,6 +595,20 @@ export default function ClientDashboardPage() {
     await supabase.auth.signOut();
     window.location.href = "/login";
   };
+
+{/* Streaks & Achievements */}
+{client && (
+  <div className="mt-6">
+    <StreakDisplay clientId={client.id} />
+  </div>
+)}
+
+{/* Leaderboard */}
+{client && (
+  <div className="mt-6">
+    <Leaderboard currentClientId={client.id} />
+  </div>
+)}
 
   return (
     <>

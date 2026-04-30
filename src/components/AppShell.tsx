@@ -14,19 +14,16 @@ import {
   ClipboardList,
   LogOut,
   MessageSquare,
+  Settings,
+  Bell,
 } from "lucide-react";
 import Logo from "./Logo";
-import { styles } from "@/lib/design";
-import NotificationBell from "./NotificationBell";
-
+import { useTheme } from "@/contexts/ThemeContext";
 
 type NavItem = {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string; size?: number }>;
-  /** Match these path prefixes for "active" state.
-   *  e.g. "/client/nutrition" should be active when on
-   *  /client/nutrition, /client/meal-planner, /client/shopping-list */
   matches?: string[];
 };
 
@@ -34,12 +31,8 @@ const trainerNav: NavItem[] = [
   { href: "/trainer/dashboard", label: "Dashboard", icon: Home },
   { href: "/trainer/clients", label: "Clients", icon: Users },
   { href: "/trainer/recipes", label: "Recipes", icon: ChefHat },
-  {
-    href: "/trainer/program-templates",
-    label: "Programmes",
-    icon: ClipboardList,
-  },
-  { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 }, // ADD THIS
+  { href: "/trainer/program-templates", label: "Programmes", icon: ClipboardList },
+  { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const clientNav: NavItem[] = [
@@ -62,63 +55,118 @@ type Props = {
 export default function AppShell({ userType, children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
+  const { theme } = useTheme();
   const navItems = userType === "trainer" ? trainerNav : clientNav;
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [displayName, setDisplayName] = useState<string>("");
+  const [displayName, setDisplayName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [feedbackType, setFeedbackType] = useState<"bug" | "feature">("bug");
   const [feedbackTitle, setFeedbackTitle] = useState("");
   const [feedbackDescription, setFeedbackDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close avatar menu on outside click
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
+
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // Fetch display name from clients table (or fallback to email)
   useEffect(() => {
-    const fetchName = async () => {
+    const fetchProfile = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+
       if (!user) return;
 
-      // Try clients table first (has full_name)
       const { data: clientData } = await supabase
         .from("clients")
-        .select("full_name")
+        .select("full_name, avatar_url")
         .eq("profile_id", user.id)
         .maybeSingle();
 
       if (clientData?.full_name) {
         setDisplayName(clientData.full_name);
+        setAvatarUrl(clientData.avatar_url);
         return;
       }
 
-      // Fallback to email
+      const { data: trainerData } = await supabase
+        .from("trainers")
+        .select("full_name, avatar_url")
+        .eq("profile_id", user.id)
+        .maybeSingle();
+
+      if (trainerData?.full_name) {
+        setDisplayName(trainerData.full_name);
+        setAvatarUrl(trainerData.avatar_url);
+        return;
+      }
+
       if (user.email) {
         setDisplayName(user.email.split("@")[0]);
       }
     };
 
-    fetchName();
+    fetchProfile();
   }, []);
 
-  const initials = displayName
-    .split(" ")
-    .map((part) => part.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join("") || "?";
+  useEffect(() => {
+    const checkNotifications = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("read", false)
+        .limit(1);
+
+      setHasUnreadNotifications(!error && !!data && data.length > 0);
+    };
+
+    checkNotifications();
+
+    const channel = supabase
+      .channel("notifications-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+        },
+        () => {
+          checkNotifications();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const initials =
+    displayName
+      .split(" ")
+      .map((part) => part.charAt(0).toUpperCase())
+      .slice(0, 2)
+      .join("") || "?";
 
   const firstName = displayName.split(" ")[0] || "";
 
@@ -135,6 +183,16 @@ export default function AppShell({ userType, children }: Props) {
   const handleOpenFeedback = () => {
     setMenuOpen(false);
     setFeedbackModalOpen(true);
+  };
+
+  const handleOpenSettings = () => {
+    setMenuOpen(false);
+    router.push("/settings");
+  };
+
+  const handleOpenNotifications = () => {
+    setMenuOpen(false);
+    router.push("/notifications");
   };
 
   const handleSubmitFeedback = async () => {
@@ -176,79 +234,108 @@ export default function AppShell({ userType, children }: Props) {
 
   return (
     <>
-      {/* Sticky banner */}
-      <header className="sticky top-0 z-50 bg-ink text-white shadow-md">
+      <header
+        className="sticky top-0 z-50 text-white shadow-md dark:text-ink"
+        style={{ backgroundColor: theme === "dark" ? "#D4AF37" : "#111111" }}
+      >
         <div className="mx-auto flex h-18 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
-          {/* Logo */}
-          <Link
-            href={`/${userType}/dashboard`}
-            className="flex h-full shrink-0 items-center"
-          >
-            <div className="flex items-center h-16 w-16">
+          <Link href={`/${userType}/dashboard`} className="flex h-full shrink-0 items-center">
+            <div className="flex h-16 w-16 items-center">
               <Logo />
             </div>
           </Link>
 
-          {/* Nav — text on desktop, icons on mobile */}
           <nav className="flex flex-1 items-center justify-center gap-1 md:gap-6">
             {navItems.map((item) => {
               const active = isActive(item);
               const Icon = item.icon;
+
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   className={`relative flex items-center gap-2 px-2 py-2 text-sm font-medium transition-colors ${
-                    active ? "text-gold" : "text-white/70 hover:text-white"
+                    active
+                      ? theme === "dark"
+                        ? "text-navy"
+                        : "text-gold"
+                      : theme === "dark"
+                      ? "text-ink/70 hover:text-ink"
+                      : "text-white/70 hover:text-white"
                   }`}
                 >
                   <Icon size={20} className="md:hidden" />
                   <span className="hidden md:inline">{item.label}</span>
-                  {active && (
-                    <span className="absolute -bottom-4.5 left-0 right-0 h-0.5 bg-gold" />
-                  )}
+                  {active && <span className="absolute -bottom-4.5 left-0 right-0 h-0.5 bg-gold" />}
                 </Link>
               );
             })}
           </nav>
 
-<NotificationBell />
-
-<div ref={menuRef} className="relative shrink-0">
-  {/* existing avatar code */}
-</div>
-
-          {/* User avatar dropdown */}
           <div ref={menuRef} className="relative shrink-0">
             <button
               type="button"
               onClick={() => setMenuOpen((open) => !open)}
-              className="flex items-center gap-3"
+              className="relative flex items-center gap-3"
             >
-              {firstName && (
-                <span className="hidden text-sm font-medium md:inline">
-                  {firstName}
-                </span>
+              {firstName && <span className="hidden text-sm font-medium md:inline">{firstName}</span>}
+
+              {avatarUrl ? (
+                <div className="relative">
+                  <img
+                    src={avatarUrl}
+                    alt="Avatar"
+                    className="h-10 w-10 rounded-full object-cover ring-2 ring-gold"
+                  />
+                  {hasUnreadNotifications && (
+                    <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-red-500 ring-2 ring-white" />
+                  )}
+                </div>
+              ) : (
+                <div className="relative">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-navy text-sm font-semibold text-white ring-2 ring-gold">
+                    {initials}
+                  </span>
+                  {hasUnreadNotifications && (
+                    <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-red-500 ring-2 ring-white" />
+                  )}
+                </div>
               )}
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-navy text-sm font-semibold text-white ring-2 ring-gold">
-                {initials}
-              </span>
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-md bg-surface-raised text-ink shadow-lifted">
+              <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-md bg-white text-black shadow-lifted">
+                <button
+                  type="button"
+                  onClick={handleOpenNotifications}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <Bell size={16} />
+                  Notifications
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenSettings}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <Settings size={16} />
+                  Settings
+                </button>
+
                 <button
                   type="button"
                   onClick={handleOpenFeedback}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-surface-sunken"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
                 >
                   <MessageSquare size={16} />
                   Report Bug / Request
                 </button>
+
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-surface-sunken"
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
                 >
                   <LogOut size={16} />
                   Logout
@@ -259,26 +346,23 @@ export default function AppShell({ userType, children }: Props) {
         </div>
       </header>
 
-      {/* Page content */}
       <main className="min-h-[calc(100vh-72px)] bg-surface-base">
-        <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-          {children}
-        </div>
+        <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">{children}</div>
       </main>
 
-      {/* Feedback Modal */}
       {feedbackModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-          <div className={`${styles.card} w-full max-w-lg`}>
-            <h2 className={styles.h2}>Report Bug / Request Feature</h2>
+          <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-lifted">
+            <h2 className="text-xl font-semibold text-black">Report Bug / Request Feature</h2>
 
             <div className="mt-4 space-y-4">
               <div>
-                <label className="text-sm font-medium text-ink">Type</label>
+                <label className="text-sm font-medium text-black">Type</label>
                 <select
                   value={feedbackType}
                   onChange={(e) => setFeedbackType(e.target.value as "bug" | "feature")}
-                  className={styles.input}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-black focus:outline-none"
+                  style={{ backgroundColor: "#ffffff", color: "#000000" }}
                 >
                   <option value="bug">Bug Report</option>
                   <option value="feature">Feature Request</option>
@@ -286,24 +370,26 @@ export default function AppShell({ userType, children }: Props) {
               </div>
 
               <div>
-                <label className="text-sm font-medium text-ink">Title</label>
+                <label className="text-sm font-medium text-black">Title</label>
                 <input
                   type="text"
                   value={feedbackTitle}
                   onChange={(e) => setFeedbackTitle(e.target.value)}
                   placeholder="Brief summary"
-                  className={styles.input}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 placeholder:text-gray-400 focus:border-black focus:outline-none"
+                  style={{ backgroundColor: "#ffffff", color: "#000000" }}
                 />
               </div>
 
               <div>
-                <label className="text-sm font-medium text-ink">Description</label>
+                <label className="text-sm font-medium text-black">Description</label>
                 <textarea
                   value={feedbackDescription}
                   onChange={(e) => setFeedbackDescription(e.target.value)}
                   placeholder="Provide details..."
                   rows={6}
-                  className={styles.input}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 placeholder:text-gray-400 focus:border-black focus:outline-none"
+                  style={{ backgroundColor: "#ffffff", color: "#000000" }}
                 />
               </div>
 
@@ -311,10 +397,11 @@ export default function AppShell({ userType, children }: Props) {
                 <button
                   onClick={handleSubmitFeedback}
                   disabled={submitting}
-                  className={`${styles.buttonPrimary} flex-1 disabled:opacity-50`}
+                  className="flex-1 rounded-md bg-black px-4 py-2.5 font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
                 >
                   {submitting ? "Submitting..." : "Submit"}
                 </button>
+
                 <button
                   onClick={() => {
                     setFeedbackModalOpen(false);
@@ -322,7 +409,7 @@ export default function AppShell({ userType, children }: Props) {
                     setFeedbackDescription("");
                     setFeedbackType("bug");
                   }}
-                  className={`${styles.buttonSecondary} flex-1`}
+                  className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2.5 font-medium text-black transition hover:bg-gray-100"
                 >
                   Cancel
                 </button>

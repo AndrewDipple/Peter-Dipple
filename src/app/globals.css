@@ -7,29 +7,6 @@
    ========================================================================== */
 
 @theme {
-  /* -- Colours: brand ----------------------------------------------------- */
-  --color-ink: #111111;
-  --color-ink-muted: #2B2B2B;
-  --color-ink-subtle: #6B6B6B;
-
-  --color-surface-base: #FAFAFA;     /* page background */
-  --color-surface-raised: #FFFFFF;   /* cards, modals */
-  --color-surface-sunken: #F2F2F2;   /* inset areas, subtle wells */
-  --color-surface-deep: #1C2A44;     /* navy contrast blocks */
-
-  --color-gold: #D4AF37;             /* rare brand accent */
-  --color-emerald: #1F6F5E;          /* success / wellbeing */
-  --color-navy: #1C2A44;             /* depth, structural blocks */
-
-  /* -- Colours: status ---------------------------------------------------- */
-  --color-success: #1F6F5E;
-  --color-warning: #D97706;
-  --color-danger:  #DC2626;
-
-  /* -- Colours: borders --------------------------------------------------- */
-  --color-border-subtle: #E5E5E5;
-  --color-border-strong: #111111;
-
   /* -- Typography --------------------------------------------------------- */
   --font-sans: 'Poppins', system-ui, -apple-system, sans-serif;
   --font-display: 'Poppins', system-ui, -apple-system, sans-serif; /* swap to serif later */
@@ -41,13 +18,60 @@
   --radius-xl: 1.5rem;     /* 24px - large surfaces */
 
   /* -- Shadows (premium, soft) ------------------------------------------- */
---shadow-subtle: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-subtle: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
   --shadow-raised: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
   --shadow-lifted: 0 10px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10);
+
+  /* -- Section Colors ----------------------------------------------------- */
+  --color-gold: #D4AF37;             /* rare brand accent */
+  --color-emerald: #1F6F5E;          /* success / wellbeing */
+  --color-navy: #1C2A44;             /* depth, structural blocks */
+  --color-workout: #FF6B6B;          /* workout section color */
+  --color-nutrition: #4ECDC4;        /* nutrition section color */
+
+  /* -- Status Colors ------------------------------------------------------ */
+  --color-success: #1F6F5E;
+  --color-warning: #D97706;
+  --color-danger:  #DC2626;
 }
 
 /* ==========================================================================
-   BASE
+   COLOR SCHEME - Light & Dark Mode
+   Theme-aware colors that adapt based on .dark class
+   ========================================================================== */
+
+:root {
+  /* Light mode (default) */
+  --color-ink: #111111;
+  --color-ink-muted: #2B2B2B;
+  --color-ink-subtle: #6B6B6B;
+  
+  --color-surface-base: #FAFAFA;     /* page background */
+  --color-surface-raised: #FFFFFF;   /* cards, modals */
+  --color-surface-sunken: #F2F2F2;   /* inset areas, subtle wells */
+  --color-surface-deep: #1C2A44;     /* navy contrast blocks */
+  
+  --color-border-subtle: #E5E5E5;
+  --color-border-strong: #111111;
+}
+
+.dark {
+  /* Dark mode */
+  --color-ink: #FFFFFF;
+  --color-ink-muted: #9CA3AF;
+  --color-ink-subtle: #6B7280;
+  
+  --color-surface-base: #0F172A;     /* page background - deep navy */
+  --color-surface-raised: #1E293B;   /* cards, modals - slate */
+  --color-surface-sunken: #0A0F1E;   /* inset areas - deeper */
+  --color-surface-deep: #1C2A44;     /* navy contrast blocks (same) */
+  
+  --color-border-subtle: #334155;
+  --color-border-strong: #FFFFFF;
+}
+
+/* ==========================================================================
+   BASE STYLES
    ========================================================================== */
 
 body {
@@ -55,6 +79,7 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-weight: 500; /* Poppins Medium per brand guidelines */
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Form polish */
@@ -68,4 +93,48 @@ textarea:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--color-gold);
   outline-offset: 2px;
+}
+
+@tailwind utilities;
+
+/* Dark mode text fixes */
+.dark {
+  --color-ink: #FFFFFF;
+  --color-ink-muted: #9CA3AF;
+  --color-ink-subtle: #6B7280;
+  
+  --color-surface-base: #0F172A;
+  --color-surface-raised: #1E293B;
+  --color-surface-sunken: #0A0F1E;
+  --color-surface-deep: #1C2A44;
+  
+  --color-border-subtle: #334155;
+  --color-border-strong: #FFFFFF;
+}
+
+/* Ensure inputs, selects, and textareas work in dark mode */
+.dark input,
+.dark select,
+.dark textarea {
+  color: var(--color-ink);
+  background-color: var(--color-surface-raised);
+  border-color: var(--color-border-subtle);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--color-ink-subtle);
+}
+
+/* Fix any remaining white text issues */
+.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 {
+  color: var(--color-ink);
+}
+
+.dark p {
+  color: var(--color-ink-muted);
+}
+
+.dark label {
+  color: var(--color-ink);
 }

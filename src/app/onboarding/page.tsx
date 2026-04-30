@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 
-
 type Client = {
   id: string;
   profile_id: string | null;
@@ -34,6 +33,20 @@ type TemplateExercise = {
   target_weight_kg: number | null;
   sort_order: number | null;
 };
+
+const FALLBACK_DAYS = [3, 4, 5];
+
+const FALLBACK_LOCATIONS_BY_DAYS: Record<string, string[]> = {
+  "3": ["gym", "home_weights"],
+  "4": ["gym", "home_weights"],
+  "5": ["gym", "home_weights"],
+};
+
+function getWorkoutLocationLabel(location: string) {
+  if (location === "gym") return "Gym";
+  if (location === "home_weights") return "Home - Dumbbells";
+  return location;
+}
 
 function getAge(dateOfBirth: string) {
   const today = new Date();
@@ -104,19 +117,21 @@ export default function ClientOnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const availableDays = useMemo(() => {
-    return Array.from(
+    const daysFromTemplates = Array.from(
       new Set(
         templates
           .map((template) => template.days_per_week)
           .filter((value): value is number => value !== null)
       )
     ).sort((a, b) => a - b);
+
+    return daysFromTemplates.length > 0 ? daysFromTemplates : FALLBACK_DAYS;
   }, [templates]);
 
   const availableLocations = useMemo(() => {
     if (!trainingDays) return [];
 
-    return Array.from(
+    const locationsFromTemplates = Array.from(
       new Set(
         templates
           .filter((template) => template.days_per_week === Number(trainingDays))
@@ -124,6 +139,12 @@ export default function ClientOnboardingPage() {
           .filter((value): value is string => Boolean(value))
       )
     );
+
+    if (locationsFromTemplates.length > 0) {
+      return locationsFromTemplates;
+    }
+
+    return FALLBACK_LOCATIONS_BY_DAYS[trainingDays] ?? [];
   }, [templates, trainingDays]);
 
   const selectedTemplate = useMemo(() => {
@@ -169,13 +190,17 @@ export default function ClientOnboardingPage() {
 
       setClient(clientData);
 
-      const { data: templateData } = await supabase
+      const { data: templateData, error: templateError } = await supabase
         .from("program_templates")
         .select("id, name, days_per_week, duration_weeks, workout_location")
         .not("days_per_week", "is", null)
         .not("workout_location", "is", null)
         .order("days_per_week", { ascending: true })
         .order("name", { ascending: true });
+
+      if (templateError) {
+        console.error("Could not load programme templates:", templateError);
+      }
 
       setTemplates(templateData ?? []);
       setLoading(false);
@@ -269,10 +294,16 @@ export default function ClientOnboardingPage() {
       !weightKg ||
       !trainingDays ||
       !activityLevel ||
-      !workoutLocation ||
-      !selectedTemplate
+      !workoutLocation
     ) {
       alert("Please complete all onboarding questions.");
+      return;
+    }
+
+    if (!selectedTemplate) {
+      alert(
+        "No matching programme template was found for that selection. Please check programme templates."
+      );
       return;
     }
 
@@ -323,7 +354,7 @@ export default function ClientOnboardingPage() {
 
     try {
       await assignTemplateToClient(client.id, selectedTemplate.id);
-    } catch (error) {
+    } catch {
       alert("Answers saved, but programme assignment failed.");
       setSubmitting(false);
       return;
@@ -332,10 +363,10 @@ export default function ClientOnboardingPage() {
     router.replace("/client/dashboard");
   };
 
-return (
+  return (
     <main className="min-h-screen bg-surface-base p-6">
       <div className="mx-auto max-w-3xl">
-        <h1 className={`${styles.display} text-center mb-6`}>Welcome!</h1>
+        <h1 className={`${styles.display} mb-6 text-center`}>Welcome!</h1>
 
         {loading ? (
           <p className={styles.body}>Loading onboarding...</p>
@@ -346,7 +377,8 @@ return (
             <div className={styles.card}>
               <h2 className={styles.subheading}>Let’s get you set up</h2>
               <p className="mt-2 text-sm text-ink-muted">
-                Answer these quick questions so we can assign the right starting programme.
+                Answer these quick questions so we can assign the right starting
+                programme.
               </p>
             </div>
 
@@ -376,7 +408,9 @@ return (
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-ink">Height (cm)</label>
+                  <label className="text-sm font-medium text-ink">
+                    Height (cm)
+                  </label>
                   <input
                     type="number"
                     value={heightCm}
@@ -387,7 +421,9 @@ return (
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-ink">Weight (kg)</label>
+                  <label className="text-sm font-medium text-ink">
+                    Weight (kg)
+                  </label>
                   <input
                     type="number"
                     step="0.1"
@@ -399,7 +435,9 @@ return (
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-ink">Date of birth</label>
+                  <label className="text-sm font-medium text-ink">
+                    Date of birth
+                  </label>
                   <input
                     type="date"
                     value={dateOfBirth}
@@ -409,18 +447,30 @@ return (
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium text-ink">Current activity level</label>
+                  <label className="text-sm font-medium text-ink">
+                    Current activity level
+                  </label>
                   <select
                     value={activityLevel}
                     onChange={(e) => setActivityLevel(e.target.value)}
                     className={styles.input}
                   >
                     <option value="">Select</option>
-                    <option value="sedentary">Sedentary: Little/no exercise</option>
-                    <option value="lightly_active">Lightly active: 1-3 days/week</option>
-                    <option value="moderately_active">Moderately active: 3-5 days/week</option>
-                    <option value="very_active">Very active: 6-7 days/week</option>
-                    <option value="extra_active">Extra active: Physical job + training</option>
+                    <option value="sedentary">
+                      Sedentary: Little/no exercise
+                    </option>
+                    <option value="lightly_active">
+                      Lightly active: 1-3 days/week
+                    </option>
+                    <option value="moderately_active">
+                      Moderately active: 3-5 days/week
+                    </option>
+                    <option value="very_active">
+                      Very active: 6-7 days/week
+                    </option>
+                    <option value="extra_active">
+                      Extra active: Physical job + training
+                    </option>
                   </select>
                 </div>
 
@@ -438,7 +488,7 @@ return (
                   >
                     <option value="">Select</option>
                     {availableDays.map((day) => (
-                      <option key={day} value={day}>
+                      <option key={day} value={String(day)}>
                         {day} days
                       </option>
                     ))}
@@ -455,20 +505,30 @@ return (
                     className={styles.input}
                     disabled={!trainingDays}
                   >
-                    <option value="">Select</option>
+                    <option value="">
+                      {trainingDays ? "Select" : "Choose days first"}
+                    </option>
                     {availableLocations.map((location) => (
                       <option key={location} value={location}>
-                        {location === "gym"
-                          ? "Gym"
-                          : location === "home_weights"
-                          ? "Home - Dumbbells"
-                          : "Home - Bodyweight"}
+                        {getWorkoutLocationLabel(location)}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
+              {trainingDays && availableLocations.length === 0 && (
+                <p className="mt-4 text-sm text-red-600">
+                  No workout locations found for {trainingDays} days. Check your
+                  programme templates.
+                </p>
+              )}
+
+              {trainingDays && workoutLocation && !selectedTemplate && (
+                <p className="mt-4 text-sm text-red-600">
+                  No matching programme template found for this selection.
+                </p>
+              )}
 
               <button
                 onClick={handleSubmit}

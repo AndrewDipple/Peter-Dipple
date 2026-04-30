@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Weight } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -56,6 +56,25 @@ type MeasurementLog = {
   note: string | null;
 };
 
+type ExercisePR = {
+  exercise_name: string;
+  max_weight_kg: number;
+  log_date: string;
+  reps: number;
+};
+
+type StreakData = {
+  current_streak: number;
+  longest_streak: number;
+  last_workout_date: string | null;
+};
+
+type TotalVolumeData = {
+  total_weight_kg: number;
+  total_sets: number;
+  total_reps: number;
+};
+
 export default function ClientStatsPage() {
   const [client, setClient] = useState<Client | null>(null);
 
@@ -85,6 +104,12 @@ export default function ClientStatsPage() {
   const [leftThighInput, setLeftThighInput] = useState("");
   const [rightThighInput, setRightThighInput] = useState("");
   const [measurementNote, setMeasurementNote] = useState("");
+
+  // Personal Bests State
+  const [exercisePRs, setExercisePRs] = useState<ExercisePR[]>([]);
+  const [streakData, setStreakData] = useState<StreakData | null>(null);
+  const [totalVolume, setTotalVolume] = useState<TotalVolumeData | null>(null);
+  const [loadingPRs, setLoadingPRs] = useState(false);
 
   const [loading, setLoading] = useState(true);
 
@@ -144,6 +169,130 @@ export default function ClientStatsPage() {
 
   const hasMiddleWeeks = photoWeeks.length > 2;
 
+  const loadPersonalBests = async (clientId: string) => {
+    setLoadingPRs(true);
+
+    try {
+      // Get all set logs with exercise names
+      const { data: setLogs, error: setLogsError } = await supabase
+        .from("client_program_set_logs")
+        .select(`
+          actual_weight_kg,
+          actual_reps,
+          created_at,
+          client_program_day_exercise_id
+        `)
+        .eq("client_id", clientId)
+        .eq("completed", true)
+        .not("actual_weight_kg", "is", null)
+        .order("actual_weight_kg", { ascending: false });
+
+      if (setLogsError) throw setLogsError;
+
+      if (setLogs && setLogs.length > 0) {
+        // Get exercise names for these logs
+        const exerciseIds = [...new Set(setLogs.map(log => log.client_program_day_exercise_id))];
+        
+        const { data: exercises, error: exercisesError } = await supabase
+          .from("client_program_day_exercises")
+          .select("id, exercise_name")
+          .in("id", exerciseIds);
+
+        if (exercisesError) throw exercisesError;
+
+        // Create a map of exercise_id to exercise_name
+        const exerciseMap = new Map(
+          exercises?.map(ex => [ex.id, ex.exercise_name]) || []
+        );
+
+        // Group by exercise and find max weight for each
+        const prMap = new Map<string, ExercisePR>();
+
+        setLogs.forEach(log => {
+          const exerciseName = exerciseMap.get(log.client_program_day_exercise_id);
+          if (!exerciseName) return;
+
+          const existing = prMap.get(exerciseName);
+          
+          if (!existing || log.actual_weight_kg > existing.max_weight_kg) {
+            prMap.set(exerciseName, {
+              exercise_name: exerciseName,
+              max_weight_kg: log.actual_weight_kg,
+              log_date: log.created_at.split("T")[0],
+              reps: log.actual_reps || 0,
+            });
+          }
+        });
+
+        // Sort by weight and take top 5
+        const topPRs = Array.from(prMap.values())
+          .sort((a, b) => b.max_weight_kg - a.max_weight_kg)
+          .slice(0, 5);
+
+        setExercisePRs(topPRs);
+      }
+
+      // Get streak data
+      const { data: streaks, error: streaksError } = await supabase
+        .from("client_streaks")
+        .select("*")
+        .eq("client_id", clientId)
+        .eq("streak_type", "workout")
+        .single();
+
+      if (streaksError && streaksError.code !== "PGRST116") {
+        throw streaksError;
+      }
+
+      if (streaks) {
+        setStreakData({
+          current_streak: streaks.current_streak || 0,
+          longest_streak: streaks.longest_streak || 0,
+          last_workout_date: streaks.last_activity_date,
+        });
+      } else {
+        setStreakData({
+          current_streak: 0,
+          longest_streak: 0,
+          last_workout_date: null,
+        });
+      }
+
+      // Calculate total volume lifted (all completed sets)
+      const { data: allCompletedSets, error: volumeError } = await supabase
+        .from("client_program_set_logs")
+        .select("actual_weight_kg, actual_reps")
+        .eq("client_id", clientId)
+        .eq("completed", true)
+        .not("actual_weight_kg", "is", null)
+        .not("actual_reps", "is", null);
+
+      if (volumeError) {
+        console.error("Error loading volume data:", volumeError);
+      } else if (allCompletedSets && allCompletedSets.length > 0) {
+        const totalWeightLifted = allCompletedSets.reduce((sum, set) => {
+          return sum + (set.actual_weight_kg * set.actual_reps);
+        }, 0);
+
+        setTotalVolume({
+          total_weight_kg: Math.round(totalWeightLifted),
+          total_sets: allCompletedSets.length,
+          total_reps: allCompletedSets.reduce((sum, set) => sum + set.actual_reps, 0),
+        });
+      } else {
+        setTotalVolume({
+          total_weight_kg: 0,
+          total_sets: 0,
+          total_reps: 0,
+        });
+      }
+    } catch (error) {
+      console.error("Error loading personal bests:", error);
+    } finally {
+      setLoadingPRs(false);
+    }
+  };
+
   const loadStats = async () => {
     setLoading(true);
 
@@ -171,6 +320,9 @@ export default function ClientStatsPage() {
     }
 
     setClient(clientData);
+
+    // Load personal bests
+    await loadPersonalBests(clientData.id);
 
     const { data: weightData } = await supabase
       .from("client_weight_logs")
@@ -393,6 +545,133 @@ export default function ClientStatsPage() {
         <p className={styles.body}>Client not found.</p>
       ) : (
         <div className="mt-6 space-y-6">
+          {/* Personal Bests Section */}
+          <div className={styles.card}>
+            <div className="flex items-center gap-2">
+              <Trophy className="text-gold" size={24} />
+              <h2 className={styles.h2}>Personal Bests</h2>
+            </div>
+
+            {loadingPRs ? (
+              <p className={styles.body}>Loading personal bests...</p>
+            ) : (
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                {/* Total Weight Lifted */}
+                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Weight className="text-gold" size={20} />
+                    <h3 className="text-sm font-semibold text-ink">Total Volume</h3>
+                  </div>
+
+                  {totalVolume ? (
+                    <div className="space-y-3">
+                      <div className="rounded-lg bg-surface-sunken p-3 text-center">
+                        <p className="text-xs text-ink-muted mb-1">Total Weight Lifted</p>
+                        <p className="text-3xl font-bold text-gold">
+                          {totalVolume.total_weight_kg.toLocaleString()}
+                        </p>
+                        <p className="text-sm text-ink-muted">kg</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg bg-surface-sunken p-2 text-center">
+                          <p className="text-xs text-ink-muted">Sets</p>
+                          <p className="text-lg font-semibold text-ink">
+                            {totalVolume.total_sets.toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-surface-sunken p-2 text-center">
+                          <p className="text-xs text-ink-muted">Reps</p>
+                          <p className="text-lg font-semibold text-ink">
+                            {totalVolume.total_reps.toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className={styles.body}>No workout data yet.</p>
+                  )}
+                </div>
+
+                {/* Workout Streaks */}
+                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Flame className="text-workout" size={20} />
+                    <h3 className="text-sm font-semibold text-ink">Workout Streaks</h3>
+                  </div>
+
+                  {streakData ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between rounded-lg bg-surface-sunken p-3">
+                        <span className="text-sm text-ink-muted">Current Streak</span>
+                        <span className="text-2xl font-bold text-workout">
+                          {streakData.current_streak}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between rounded-lg bg-surface-sunken p-3">
+                        <span className="text-sm text-ink-muted">Longest Streak</span>
+                        <span className="text-2xl font-bold text-gold">
+                          {streakData.longest_streak}
+                        </span>
+                      </div>
+
+                      {streakData.last_workout_date && (
+                        <p className="text-xs text-ink-muted text-center">
+                          Last workout: {streakData.last_workout_date}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className={styles.body}>No streak data yet. Complete a workout to start!</p>
+                  )}
+                </div>
+
+                {/* Heaviest Lifts */}
+                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <TrendingUp className="text-gold" size={20} />
+                    <h3 className="text-sm font-semibold text-ink">Heaviest Lifts</h3>
+                  </div>
+
+                  {exercisePRs.length === 0 ? (
+                    <p className={styles.body}>No personal records yet. Keep lifting!</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {exercisePRs.map((pr, index) => (
+                        <div
+                          key={`${pr.exercise_name}-${index}`}
+                          className="rounded-lg bg-surface-sunken p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-ink truncate">
+                                {pr.exercise_name}
+                              </p>
+                              <p className="text-xs text-ink-muted">
+                                {pr.log_date}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-bold text-gold">
+                                {pr.max_weight_kg}kg
+                              </p>
+                              {pr.reps > 0 && (
+                                <p className="text-xs text-ink-muted">
+                                  {pr.reps} reps
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className={styles.card}>
             <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
               <div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { updateStreak } from "@/lib/streaks";
 
 type Recipe = {
   id: string;
@@ -187,59 +188,62 @@ export default function ClientNutritionPage() {
     setLoading(false);
   };
 
-  const handleAddRecipeMeal = async () => {
-    if (!clientId) {
-      alert("Client not found");
+const handleAddRecipeMeal = async () => {
+  if (!clientId) {
+    alert("Client not found");
+    return;
+  }
+
+  if (!selectedRecipeId) {
+    alert("Please choose a recipe");
+    return;
+  }
+
+  setAddingRecipe(true);
+
+  const existingMeal = mealLogs.find((meal) => meal.recipe_id === selectedRecipeId);
+
+  if (existingMeal) {
+    const currentQuantity = existingMeal.quantity ?? 1;
+
+    const { error } = await supabase
+      .from("meal_logs")
+      .update({
+        quantity: currentQuantity + 1,
+        completed: true,
+      })
+      .eq("id", existingMeal.id);
+
+    if (error) {
+      alert("Error updating meal quantity");
+      setAddingRecipe(false);
       return;
     }
+  } else {
+    const { error } = await supabase.from("meal_logs").insert([
+      {
+        client_id: clientId,
+        recipe_id: selectedRecipeId,
+        log_date: today,
+        completed: true,
+        quantity: 1,
+      },
+    ]);
 
-    if (!selectedRecipeId) {
-      alert("Please choose a recipe");
+    if (error) {
+      alert("Error adding recipe meal");
+      setAddingRecipe(false);
       return;
     }
+  }
 
-    setAddingRecipe(true);
+  setSelectedRecipeId("");
+  setAddingRecipe(false);
+  await loadPage();
 
-    const existingMeal = mealLogs.find((meal) => meal.recipe_id === selectedRecipeId);
-
-    if (existingMeal) {
-      const currentQuantity = existingMeal.quantity ?? 1;
-
-      const { error } = await supabase
-        .from("meal_logs")
-        .update({
-          quantity: currentQuantity + 1,
-          completed: true,
-        })
-        .eq("id", existingMeal.id);
-
-      if (error) {
-        alert("Error updating meal quantity");
-        setAddingRecipe(false);
-        return;
-      }
-    } else {
-      const { error } = await supabase.from("meal_logs").insert([
-        {
-          client_id: clientId,
-          recipe_id: selectedRecipeId,
-          log_date: today,
-          completed: true,
-          quantity: 1,
-        },
-      ]);
-
-      if (error) {
-        alert("Error adding recipe meal");
-        setAddingRecipe(false);
-        return;
-      }
-    }
-
-    setSelectedRecipeId("");
-    setAddingRecipe(false);
-    await loadPage();
-  };
+  // 🔥 UPDATE NUTRITION STREAK (trigger on any meal logged)
+  await updateStreak(clientId, "nutrition", today);
+};
 
   const handleQuantityChange = async (mealId: string, newQuantity: number) => {
     if (newQuantity < 1) return;
@@ -281,45 +285,48 @@ export default function ClientNutritionPage() {
     setRemovingMealId(null);
   };
 
-  const handleAddCustomMeal = async () => {
-    if (!clientId) {
-      alert("Client not found");
-      return;
-    }
+const handleAddCustomMeal = async () => {
+  if (!clientId) {
+    alert("Client not found");
+    return;
+  }
 
-    if (customMealName.trim() === "" || customMealCalories.trim() === "") {
-      alert("Please add a meal name and calories");
-      return;
-    }
+  if (customMealName.trim() === "" || customMealCalories.trim() === "") {
+    alert("Please add a meal name and calories");
+    return;
+  }
 
-    setSavingCustomMeal(true);
+  setSavingCustomMeal(true);
 
-    const { data, error } = await supabase
-      .from("custom_meal_logs")
-      .insert([
-        {
-          client_id: clientId,
-          meal_name: customMealName.trim(),
-          calories: Number(customMealCalories),
-          log_date: today,
-          note: customMealNote.trim() || null,
-        },
-      ])
-      .select()
-      .single();
+  const { data, error } = await supabase
+    .from("custom_meal_logs")
+    .insert([
+      {
+        client_id: clientId,
+        meal_name: customMealName.trim(),
+        calories: Number(customMealCalories),
+        log_date: today,
+        note: customMealNote.trim() || null,
+      },
+    ])
+    .select()
+    .single();
 
-    if (error) {
-      alert("Error saving custom meal");
-      setSavingCustomMeal(false);
-      return;
-    }
-
-    setCustomMeals((prev) => [data, ...prev]);
-    setCustomMealName("");
-    setCustomMealCalories("");
-    setCustomMealNote("");
+  if (error) {
+    alert("Error saving custom meal");
     setSavingCustomMeal(false);
-  };
+    return;
+  }
+
+  setCustomMeals((prev) => [data, ...prev]);
+  setCustomMealName("");
+  setCustomMealCalories("");
+  setCustomMealNote("");
+  setSavingCustomMeal(false);
+
+  // 🔥 UPDATE NUTRITION STREAK
+  await updateStreak(clientId, "nutrition", today);
+};
 
   const handleRemoveCustomMeal = async (mealId: string) => {
     setRemovingCustomMealId(mealId);

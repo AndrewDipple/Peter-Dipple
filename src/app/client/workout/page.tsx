@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { updateStreak } from "@/lib/streaks";
+import AchievementCelebration from "@/components/AchievementCelebration";
+import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
+import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
 
 type Client = {
   id: string;
@@ -36,16 +40,20 @@ type Exercise = {
   movement_type: string | null;
   primary_equipment: string | null;
   alternate: string | null;
+  alternative_exercises: string[] | null;
 };
 
 type ClientProgramDayExercise = {
   id: string;
   client_program_day_id: string;
+  exercise_id: string;
   exercise_name: string | null;
   sets: number | null;
   reps: string | null;
   target_weight_kg: number | null;
   sort_order: number | null;
+  original_exercise_id: string | null;
+  is_custom: boolean;
   exercise_details?: Exercise | null;
 };
 
@@ -72,6 +80,12 @@ type RestTimer = {
   totalSeconds: number;
 };
 
+type CelebrationAchievement = {
+  icon: string;
+  title: string;
+  description: string;
+};
+
 export default function ClientWorkoutPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
@@ -89,8 +103,18 @@ export default function ClientWorkoutPage() {
   const [debugMessage, setDebugMessage] = useState("");
   const [restTimer, setRestTimer] = useState<RestTimer | null>(null);
   const [showVideo, setShowVideo] = useState(false);
+  const [celebrationAchievement, setCelebrationAchievement] =
+    useState<CelebrationAchievement | null>(null);
+  const [alternativeModalExercise, setAlternativeModalExercise] = useState<{
+    exercise: any;
+    clientProgramDayExerciseId: string;
+  } | null>(null);
+  const [showAddExercise, setShowAddExercise] = useState(false);
+  const [addingExercise, setAddingExercise] = useState(false);
+  const [swappingBack, setSwappingBack] = useState<string | null>(null);
 
-  // Rest timer countdown
+  const today = new Date().toISOString().split("T")[0];
+
   useEffect(() => {
     if (!restTimer) return;
 
@@ -102,6 +126,7 @@ export default function ClientWorkoutPage() {
     const interval = setInterval(() => {
       setRestTimer((prev) => {
         if (!prev || prev.secondsRemaining <= 1) return null;
+
         return {
           ...prev,
           secondsRemaining: prev.secondsRemaining - 1,
@@ -112,70 +137,75 @@ export default function ClientWorkoutPage() {
     return () => clearInterval(interval);
   }, [restTimer]);
 
-  useEffect(() => {
-    const loadWorkout = async () => {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+  const loadWorkout = async () => {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-      if (userError || !user) {
-        setDebugMessage("No logged-in auth user found.");
-        setLoading(false);
-        return;
-      }
+    if (userError || !user) {
+      setDebugMessage("No logged-in auth user found.");
+      setLoading(false);
+      return;
+    }
 
-      const { data: clientData, error: clientError } = await supabase
-        .from("clients")
-        .select("id, full_name, profile_id")
-        .eq("profile_id", user.id)
-        .single();
+    const { data: clientData, error: clientError } = await supabase
+      .from("clients")
+      .select("id, full_name, profile_id")
+      .eq("profile_id", user.id)
+      .single();
 
-      if (clientError || !clientData) {
-        setDebugMessage(`No client row matches logged-in user id: ${user.id}`);
-        setLoading(false);
-        return;
-      }
+    if (clientError || !clientData) {
+      setDebugMessage(`No client row matches logged-in user id: ${user.id}`);
+      setLoading(false);
+      return;
+    }
 
-      setClient(clientData);
+    setClient(clientData);
 
-      const { data: clientProgramData, error: clientProgramError } = await supabase
+    const { data: clientProgramData, error: clientProgramError } =
+      await supabase
         .from("client_programs")
         .select("*")
         .eq("client_id", clientData.id)
         .order("created_at", { ascending: false })
         .limit(1);
 
-      if (clientProgramError || !clientProgramData || clientProgramData.length === 0) {
-        setDebugMessage("No client programme found for this client.");
-        setLoading(false);
-        return;
-      }
-
-      const program = clientProgramData[0];
-      setClientProgram(program);
-
-      const { data: daysData, error: daysError } = await supabase
-        .from("client_program_days")
-        .select("*")
-        .eq("client_program_id", program.id)
-        .order("sort_order", { ascending: true });
-
-      if (daysError || !daysData || daysData.length === 0) {
-        setDebugMessage("No programme days found for this client.");
-        setLoading(false);
-        return;
-      }
-
-      setProgramDays(daysData);
-
-      const firstIncompleteDay =
-        daysData.find((day) => !day.completed) ?? daysData[0];
-
-      setSelectedDayId(firstIncompleteDay.id);
+    if (
+      clientProgramError ||
+      !clientProgramData ||
+      clientProgramData.length === 0
+    ) {
+      setDebugMessage("No client programme found for this client.");
       setLoading(false);
-    };
+      return;
+    }
 
+    const program = clientProgramData[0];
+    setClientProgram(program);
+
+    const { data: daysData, error: daysError } = await supabase
+      .from("client_program_days")
+      .select("*")
+      .eq("client_program_id", program.id)
+      .order("sort_order", { ascending: true });
+
+    if (daysError || !daysData || daysData.length === 0) {
+      setDebugMessage("No programme days found for this client.");
+      setLoading(false);
+      return;
+    }
+
+    setProgramDays(daysData);
+
+    const firstIncompleteDay =
+      daysData.find((day) => !day.completed) ?? daysData[0];
+
+    setSelectedDayId(firstIncompleteDay.id);
+    setLoading(false);
+  };
+
+  useEffect(() => {
     loadWorkout();
   }, []);
 
@@ -183,7 +213,9 @@ export default function ClientWorkoutPage() {
     const loadSelectedDay = async () => {
       if (!client || !clientProgram || !selectedDayId) return;
 
-      const selectedDay = programDays.find((day) => day.id === selectedDayId) || null;
+      const selectedDay =
+        programDays.find((day) => day.id === selectedDayId) || null;
+
       setCurrentDay(selectedDay);
       setDrafts({});
       setPreviousWeights({});
@@ -214,46 +246,50 @@ export default function ClientWorkoutPage() {
         return;
       }
 
-      // Load exercise details from exercises table
-      const exerciseNames = exerciseData
-        .map((e) => e.exercise_name)
+      // Get all exercise IDs (current and original)
+      const exerciseIds = exerciseData
+        .map((e) => e.exercise_id)
         .filter(Boolean) as string[];
+      const originalExerciseIds = exerciseData
+        .map((e) => e.original_exercise_id)
+        .filter(Boolean) as string[];
+      const allExerciseIds = [...new Set([...exerciseIds, ...originalExerciseIds])];
 
       let exerciseDetailsMap: Record<string, Exercise> = {};
 
-      if (exerciseNames.length > 0) {
+      if (allExerciseIds.length > 0) {
         const { data: exerciseDetails } = await supabase
           .from("exercises")
           .select("*")
-          .in("name", exerciseNames);
+          .in("id", allExerciseIds);
 
         if (exerciseDetails) {
           exerciseDetailsMap = Object.fromEntries(
-            exerciseDetails.map((ex) => [ex.name, ex])
+            exerciseDetails.map((ex) => [ex.id, ex])
           );
         }
       }
 
-      // Attach exercise details to each day exercise
       const enrichedExercises = exerciseData.map((ex) => ({
         ...ex,
-        exercise_details: ex.exercise_name
-          ? exerciseDetailsMap[ex.exercise_name] || null
+        exercise_details: ex.exercise_id
+          ? exerciseDetailsMap[ex.exercise_id] || null
           : null,
       }));
 
       setDayExercises(enrichedExercises);
       setActiveExerciseId(enrichedExercises[0]?.id ?? "");
-      const exerciseIds = enrichedExercises.map((e) => e.id);
 
-      if (exerciseIds.length > 0) {
+      const exerciseRecordIds = enrichedExercises.map((e) => e.id);
+
+      if (exerciseRecordIds.length > 0) {
         const { data: setLogData, error: setLogError } = await supabase
           .from("client_program_set_logs")
           .select("*")
           .eq("client_id", client.id)
           .eq("client_program_id", clientProgram.id)
           .eq("client_program_day_id", selectedDay.id)
-          .in("client_program_day_exercise_id", exerciseIds);
+          .in("client_program_day_exercise_id", exerciseRecordIds);
 
         if (!setLogError && setLogData) {
           setSetLogs(setLogData);
@@ -264,6 +300,7 @@ export default function ClientWorkoutPage() {
         setSetLogs([]);
       }
 
+      // Load previous weights
       const exerciseNamesForPrevious = Array.from(
         new Set(
           enrichedExercises
@@ -311,6 +348,10 @@ export default function ClientWorkoutPage() {
     loadSelectedDay();
   }, [selectedDayId, client, clientProgram, programDays]);
 
+  const reloadWorkout = async () => {
+    await loadWorkout();
+  };
+
   const getSetLog = (exerciseId: string, setNumber: number) =>
     setLogs.find(
       (log) =>
@@ -328,37 +369,56 @@ export default function ClientWorkoutPage() {
 
   const getRememberedWeight = (exercise: ClientProgramDayExercise) => {
     if (!exercise.exercise_name) return "";
+
     const previousWeight = previousWeights[exercise.exercise_name];
+
     if (previousWeight !== null && previousWeight !== undefined) {
       return String(previousWeight);
     }
+
     return "";
   };
 
-  const getDisplayWeight = (exercise: ClientProgramDayExercise, setNumber: number) => {
+  const getDisplayWeight = (
+    exercise: ClientProgramDayExercise,
+    setNumber: number
+  ) => {
     const key = getDraftKey(exercise.id, setNumber);
+
     if (drafts[key]?.weight !== undefined) return drafts[key].weight;
 
     const setLog = getSetLog(exercise.id, setNumber);
-    if (setLog?.actual_weight_kg !== null && setLog?.actual_weight_kg !== undefined) {
+
+    if (
+      setLog?.actual_weight_kg !== null &&
+      setLog?.actual_weight_kg !== undefined
+    ) {
       return String(setLog.actual_weight_kg);
     }
 
     const rememberedWeight = getRememberedWeight(exercise);
     if (rememberedWeight !== "") return rememberedWeight;
 
-    if (exercise.target_weight_kg !== null && exercise.target_weight_kg !== undefined) {
+    if (
+      exercise.target_weight_kg !== null &&
+      exercise.target_weight_kg !== undefined
+    ) {
       return String(exercise.target_weight_kg);
     }
 
     return "";
   };
 
-  const getDisplayReps = (exercise: ClientProgramDayExercise, setNumber: number) => {
+  const getDisplayReps = (
+    exercise: ClientProgramDayExercise,
+    setNumber: number
+  ) => {
     const key = getDraftKey(exercise.id, setNumber);
+
     if (drafts[key]?.reps !== undefined) return drafts[key].reps;
 
     const setLog = getSetLog(exercise.id, setNumber);
+
     if (setLog?.actual_reps !== null && setLog?.actual_reps !== undefined) {
       return String(setLog.actual_reps);
     }
@@ -381,6 +441,7 @@ export default function ClientWorkoutPage() {
   }, [dayExercises, setLogs]);
 
   const totalExercises = dayExercises.length;
+
   const completionPercentage =
     totalExercises > 0
       ? Math.round((completedExerciseCount / totalExercises) * 100)
@@ -415,10 +476,7 @@ export default function ClientWorkoutPage() {
 
     const existing = getSetLog(exerciseId, setNumber);
 
-    // FIRST WORKOUT TRIGGER: Check if program needs to be started
     if (!existing && clientProgram?.program_start_date === null) {
-      const today = new Date().toISOString().split("T")[0];
-      
       await supabase
         .from("client_programs")
         .update({
@@ -427,7 +485,6 @@ export default function ClientWorkoutPage() {
         })
         .eq("id", clientProgramId);
 
-      // Update local state
       setClientProgram((prev) =>
         prev
           ? {
@@ -509,7 +566,40 @@ export default function ClientWorkoutPage() {
       },
     });
 
-    // Start rest timer if completing the set
+    if (checked) {
+      const unlockedAchievements = await updateStreak(
+        client.id,
+        "workout",
+        today
+      );
+
+      if (unlockedAchievements.length > 0) {
+        const achievementType = unlockedAchievements[0];
+
+        const achievementDetails: Record<string, CelebrationAchievement> = {
+          workout_streak_7: {
+            icon: "🔥",
+            title: "Week Warrior",
+            description: "7-day workout streak!",
+          },
+          workout_streak_30: {
+            icon: "💪",
+            title: "Month Master",
+            description: "30-day workout streak!",
+          },
+          workout_streak_100: {
+            icon: "👑",
+            title: "Century Champion",
+            description: "100-day workout streak!",
+          },
+        };
+
+        if (achievementDetails[achievementType]) {
+          setCelebrationAchievement(achievementDetails[achievementType]);
+        }
+      }
+    }
+
     if (checked && exercise.exercise_details?.rest) {
       setRestTimer({
         exerciseId: exercise.id,
@@ -520,8 +610,13 @@ export default function ClientWorkoutPage() {
     }
   };
 
-  const handleWeightChange = (exerciseId: string, setNumber: number, value: string) => {
+  const handleWeightChange = (
+    exerciseId: string,
+    setNumber: number,
+    value: string
+  ) => {
     const key = getDraftKey(exerciseId, setNumber);
+
     setDrafts((prev) => ({
       ...prev,
       [key]: {
@@ -531,8 +626,13 @@ export default function ClientWorkoutPage() {
     }));
   };
 
-  const handleRepsChange = (exerciseId: string, setNumber: number, value: string) => {
+  const handleRepsChange = (
+    exerciseId: string,
+    setNumber: number,
+    value: string
+  ) => {
     const key = getDraftKey(exerciseId, setNumber);
+
     setDrafts((prev) => ({
       ...prev,
       [key]: {
@@ -542,7 +642,10 @@ export default function ClientWorkoutPage() {
     }));
   };
 
-  const handleWeightBlur = async (exercise: ClientProgramDayExercise, setNumber: number) => {
+  const handleWeightBlur = async (
+    exercise: ClientProgramDayExercise,
+    setNumber: number
+  ) => {
     if (!client || !clientProgram || !currentDay) return;
 
     const setLog = getSetLog(exercise.id, setNumber);
@@ -563,7 +666,10 @@ export default function ClientWorkoutPage() {
     });
   };
 
-  const handleRepsBlur = async (exercise: ClientProgramDayExercise, setNumber: number) => {
+  const handleRepsBlur = async (
+    exercise: ClientProgramDayExercise,
+    setNumber: number
+  ) => {
     if (!client || !clientProgram || !currentDay) return;
 
     const setLog = getSetLog(exercise.id, setNumber);
@@ -584,64 +690,137 @@ export default function ClientWorkoutPage() {
     });
   };
 
-  const handleCompleteDay = async () => {
+  const handleSwapBack = async (exercise: ClientProgramDayExercise) => {
+    if (!exercise.original_exercise_id) return;
+
+    setSwappingBack(exercise.id);
+
+    const { error } = await supabase
+      .from("client_program_day_exercises")
+      .update({
+        exercise_id: exercise.original_exercise_id,
+        original_exercise_id: null,
+      })
+      .eq("id", exercise.id);
+
+    if (error) {
+      console.error("Error swapping back:", error);
+      alert("Failed to swap back to original exercise.");
+      setSwappingBack(null);
+      return;
+    }
+
+    setSwappingBack(null);
+    await loadWorkout();
+  };
+
+  const handleAddCustomExercise = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!currentDay || !client) return;
+
+    setAddingExercise(true);
+
+    const formData = new FormData(e.currentTarget);
+    const exerciseName = formData.get("exercise_name") as string;
+    const sets = parseInt(formData.get("sets") as string) || 3;
+    const reps = formData.get("reps") as string || "10";
+    const targetWeight = formData.get("target_weight") as string;
+
+    // Get max sort_order
+    const maxSortOrder = dayExercises.reduce(
+      (max, ex) => Math.max(max, ex.sort_order || 0),
+      0
+    );
+
+    const { error } = await supabase
+      .from("client_program_day_exercises")
+      .insert({
+        client_program_day_id: currentDay.id,
+        exercise_id: null,
+        exercise_name: exerciseName,
+        sets,
+        reps,
+        target_weight_kg: targetWeight ? parseFloat(targetWeight) : null,
+        sort_order: maxSortOrder + 1,
+        is_custom: true,
+        original_exercise_id: null,
+      });
+
+    if (error) {
+      console.error("Error adding exercise:", error);
+      alert("Failed to add exercise.");
+      setAddingExercise(false);
+      return;
+    }
+
+    setAddingExercise(false);
+    setShowAddExercise(false);
+    await loadWorkout();
+  };
+
+  const handleToggleDayCompletion = async () => {
     if (!currentDay) return;
 
     setCompletingDay(true);
 
+    const newCompletedStatus = !currentDay.completed;
+
     const { error } = await supabase
       .from("client_program_days")
-      .update({ completed: true })
+      .update({ completed: newCompletedStatus })
       .eq("id", currentDay.id);
 
     if (error) {
-      alert("Error completing day");
+      alert(`Error ${newCompletedStatus ? 'completing' : 'marking incomplete'} day`);
       setCompletingDay(false);
       return;
     }
 
     const updatedDays = programDays.map((day) =>
-      day.id === currentDay.id ? { ...day, completed: true } : day
+      day.id === currentDay.id ? { ...day, completed: newCompletedStatus } : day
     );
+
     setProgramDays(updatedDays);
 
-    const nextDay = updatedDays.find((day) => !day.completed);
-    if (nextDay) {
-      setSelectedDayId(nextDay.id);
-    } else {
-      setCurrentDay(null);
-      setDayExercises([]);
-      setSetLogs([]);
+    // Update current day state
+    setCurrentDay({ ...currentDay, completed: newCompletedStatus });
+
+    // Only navigate to next incomplete day if marking as complete
+    if (newCompletedStatus) {
+      const nextDay = updatedDays.find((day) => !day.completed);
+
+      if (nextDay) {
+        setSelectedDayId(nextDay.id);
+      }
     }
 
-    setDrafts({});
-    setPreviousWeights({});
     setCompletingDay(false);
-    alert("Workout day completed!");
+    alert(`Workout day ${newCompletedStatus ? 'completed' : 'marked as incomplete'}!`);
   };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
+
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   const getYouTubeEmbedUrl = (url: string | null) => {
     if (!url) return null;
-    
-    // Extract video ID from various YouTube URL formats
+
     const patterns = [
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\?\/]+)/,
-      /youtube\.com\/shorts\/([^&\?\/]+)/,
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?\/]+)/,
+      /youtube\.com\/shorts\/([^&?\/]+)/,
     ];
-    
+
     for (const pattern of patterns) {
       const match = url.match(pattern);
+
       if (match && match[1]) {
         return `https://www.youtube.com/embed/${match[1]}`;
       }
     }
-    
+
     return null;
   };
 
@@ -649,7 +828,6 @@ export default function ClientWorkoutPage() {
     <>
       <h1 className={styles.display}>Workout</h1>
 
-      {/* Rest Timer Banner */}
       {restTimer && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-workout px-4 py-3 text-white shadow-lg">
           <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -659,10 +837,12 @@ export default function ClientWorkoutPage() {
                 Set {restTimer.setNumber} complete
               </p>
             </div>
+
             <div className="flex items-center gap-4">
               <p className="text-2xl font-bold tabular-nums">
                 {formatTime(restTimer.secondsRemaining)}
               </p>
+
               <button
                 onClick={() => setRestTimer(null)}
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-medium hover:bg-white/30"
@@ -690,9 +870,11 @@ export default function ClientWorkoutPage() {
                 <h2 className={styles.h2}>
                   {currentDay.day_name || "Workout Day"}
                 </h2>
+
                 <p className="mt-1 text-sm text-ink-muted">
                   Current selected day
                 </p>
+
                 {clientProgram.current_week > 0 && (
                   <p className="mt-1 text-xs text-ink-muted">
                     Week {clientProgram.current_week}
@@ -704,6 +886,7 @@ export default function ClientWorkoutPage() {
                 <label className="text-sm font-medium text-ink">
                   Change workout day
                 </label>
+
                 <select
                   value={selectedDayId}
                   onChange={(e) => setSelectedDayId(e.target.value)}
@@ -723,6 +906,7 @@ export default function ClientWorkoutPage() {
               <span className="text-sm text-ink">
                 {completedExerciseCount} of {totalExercises} exercises complete
               </span>
+
               <span className="text-sm text-ink-muted">
                 {completionPercentage}% completed
               </span>
@@ -756,29 +940,84 @@ export default function ClientWorkoutPage() {
                         className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-medium transition ${
                           isActive
                             ? styles.buttonPrimaryWorkout
-                            : "border border-slate-200 bg-white text-ink hover:bg-surface"
+                            : "border border-border-subtle bg-surface-raised text-ink hover:bg-surface-sunken"
                         }`}
                       >
                         {exercise.exercise_name || `Exercise ${index + 1}`}
+                        {exercise.is_custom && " ⭐"}
                       </button>
                     );
                   })}
                 </div>
 
                 <div className={styles.card}>
-                  <p className="font-semibold text-ink">
-                    {activeExercise.exercise_name}
-                  </p>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-ink">
+                        {activeExercise.exercise_name}
+                        {activeExercise.is_custom && (
+                          <span className="ml-2 rounded-full bg-gold/20 px-2 py-0.5 text-xs font-medium text-gold">
+                            Custom
+                          </span>
+                        )}
+                        {activeExercise.original_exercise_id && (
+                          <span className="ml-2 rounded-full bg-blue-500/20 px-2 py-0.5 text-xs font-medium text-blue-600">
+                            Swapped
+                          </span>
+                        )}
+                      </h3>
 
-                  <p className="text-sm text-ink-muted">
-                    Target: {activeExercise.sets ?? "-"} sets ×{" "}
-                    {activeExercise.reps ?? "-"} reps
-                    {activeExercise.target_weight_kg !== null
-                      ? ` × ${activeExercise.target_weight_kg}kg`
-                      : ""}
-                  </p>
+                      <p className="text-sm text-ink-muted">
+                        Target: {activeExercise.sets ?? "-"} sets ×{" "}
+                        {activeExercise.reps ?? "-"} reps
+                        {activeExercise.target_weight_kg !== null
+                          ? ` × ${activeExercise.target_weight_kg}kg`
+                          : ""}
+                      </p>
+                    </div>
 
-                  {/* Exercise Details */}
+                    <div className="flex gap-2">
+                      {/* Swap Back Button */}
+                      {activeExercise.original_exercise_id && (
+                        <button
+                          onClick={() => handleSwapBack(activeExercise)}
+                          disabled={swappingBack === activeExercise.id}
+                          className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-sunken px-3 py-1.5 text-xs font-medium text-ink-muted hover:bg-surface-raised hover:text-ink disabled:opacity-50"
+                        >
+                          {swappingBack === activeExercise.id ? (
+                            <>
+                              <RefreshCw size={14} className="animate-spin" />
+                              Swapping...
+                            </>
+                          ) : (
+                            <>
+                              <Undo2 size={14} />
+                              Swap Back
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {/* Alternative Exercise Button */}
+                      {!activeExercise.is_custom &&
+                        activeExercise.exercise_details?.alternative_exercises &&
+                        activeExercise.exercise_details.alternative_exercises.length > 0 && (
+                          <button
+                            onClick={() =>
+                              setAlternativeModalExercise({
+                                exercise: activeExercise.exercise_details,
+                                clientProgramDayExerciseId: activeExercise.id,
+                              })
+                            }
+                            className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-sunken px-3 py-1.5 text-xs font-medium text-ink-muted hover:bg-surface-raised hover:text-ink"
+                          >
+                            <RefreshCw size={14} />
+                            Alternative
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
                   {activeExercise.exercise_details && (
                     <div className="mt-3 grid gap-2 rounded-xl bg-surface-sunken p-3 text-sm md:grid-cols-3">
                       {activeExercise.exercise_details.primary_equipment && (
@@ -789,6 +1028,7 @@ export default function ClientWorkoutPage() {
                           </p>
                         </div>
                       )}
+
                       {activeExercise.exercise_details.target_muscle && (
                         <div>
                           <p className="font-medium text-ink">Target Muscle</p>
@@ -797,6 +1037,7 @@ export default function ClientWorkoutPage() {
                           </p>
                         </div>
                       )}
+
                       {activeExercise.exercise_details.movement_type && (
                         <div>
                           <p className="font-medium text-ink">Movement Type</p>
@@ -810,16 +1051,24 @@ export default function ClientWorkoutPage() {
 
                   <div className="mt-4 space-y-3">
                     {(activeExercise.sets && activeExercise.sets > 0
-                      ? Array.from({ length: activeExercise.sets }, (_, i) => i + 1)
+                      ? Array.from(
+                          { length: activeExercise.sets },
+                          (_, i) => i + 1
+                        )
                       : [1]
                     ).map((setNumber) => {
                       const setLog = getSetLog(activeExercise.id, setNumber);
-                      const currentKey = getDraftKey(activeExercise.id, setNumber);
+                      const currentKey = getDraftKey(
+                        activeExercise.id,
+                        setNumber
+                      );
 
                       const rememberedWeight =
                         activeExercise.exercise_name &&
-                        previousWeights[activeExercise.exercise_name] !== null &&
-                        previousWeights[activeExercise.exercise_name] !== undefined
+                        previousWeights[activeExercise.exercise_name] !==
+                          null &&
+                        previousWeights[activeExercise.exercise_name] !==
+                          undefined
                           ? previousWeights[activeExercise.exercise_name]
                           : null;
 
@@ -838,10 +1087,14 @@ export default function ClientWorkoutPage() {
                             <label className="text-sm font-medium text-ink">
                               Weight (kg)
                             </label>
+
                             <input
                               type="number"
                               step="0.5"
-                              value={getDisplayWeight(activeExercise, setNumber)}
+                              value={getDisplayWeight(
+                                activeExercise,
+                                setNumber
+                              )}
                               onChange={(e) =>
                                 handleWeightChange(
                                   activeExercise.id,
@@ -855,6 +1108,7 @@ export default function ClientWorkoutPage() {
                               className={styles.input}
                               placeholder="Weight"
                             />
+
                             {rememberedWeight !== null && (
                               <p className="mt-1 text-xs text-ink-muted">
                                 Previous weight: {rememberedWeight} kg
@@ -866,9 +1120,13 @@ export default function ClientWorkoutPage() {
                             <label className="text-sm font-medium text-ink">
                               Reps completed
                             </label>
+
                             <input
                               type="number"
-                              value={getDisplayReps(activeExercise, setNumber)}
+                              value={getDisplayReps(
+                                activeExercise,
+                                setNumber
+                              )}
                               onChange={(e) =>
                                 handleRepsChange(
                                   activeExercise.id,
@@ -885,19 +1143,16 @@ export default function ClientWorkoutPage() {
                           </div>
 
                           <div className="flex items-end justify-end md:col-span-2">
-                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-ink">
+                            <label className="flex items-center gap-2 rounded-xl border border-border-subtle bg-surface-raised px-3 py-2 text-sm font-medium text-ink hover:bg-surface-sunken">
                               Completed
                               <input
                                 type="checkbox"
                                 checked={setLog?.completed ?? false}
                                 onChange={(e) =>
-                                  handleToggleSet(
-                                    activeExercise,
-                                    setNumber,
-                                    e.target.checked
-                                  )
+                                  handleToggleSet(activeExercise, setNumber, e.target.checked)
                                 }
                                 disabled={savingKey === currentKey}
+                                className="h-4 w-4 accent-gold"
                               />
                             </label>
                           </div>
@@ -906,7 +1161,6 @@ export default function ClientWorkoutPage() {
                     })}
                   </div>
 
-                  {/* YouTube Video Section */}
                   {activeExercise.exercise_details?.youtube_short && (
                     <div className="mt-4">
                       {!showVideo ? (
@@ -922,6 +1176,7 @@ export default function ClientWorkoutPage() {
                             <p className="text-sm font-medium text-ink">
                               Exercise Video
                             </p>
+
                             <button
                               onClick={() => setShowVideo(false)}
                               className="text-sm text-ink-muted hover:text-ink"
@@ -929,11 +1184,17 @@ export default function ClientWorkoutPage() {
                               Hide
                             </button>
                           </div>
-                          <div className="relative overflow-hidden rounded-xl" style={{ paddingBottom: "56.25%" }}>
+
+                          <div
+                            className="relative overflow-hidden rounded-xl"
+                            style={{ paddingBottom: "56.25%" }}
+                          >
                             <iframe
-                              src={getYouTubeEmbedUrl(
-                                activeExercise.exercise_details.youtube_short
-                              ) || ""}
+                              src={
+                                getYouTubeEmbedUrl(
+                                  activeExercise.exercise_details.youtube_short
+                                ) || ""
+                              }
                               className="absolute inset-0 h-full w-full"
                               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                               allowFullScreen
@@ -952,14 +1213,140 @@ export default function ClientWorkoutPage() {
             )}
           </div>
 
+          {/* Add Custom Exercise Section */}
+          {!showAddExercise ? (
+            <button
+              onClick={() => setShowAddExercise(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border-subtle bg-surface-raised p-4 text-sm font-medium text-ink-muted hover:border-gold hover:bg-gold/5 hover:text-ink"
+            >
+              <Plus size={20} />
+              Add Extra Exercise
+            </button>
+          ) : (
+            <div className={styles.card}>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className={styles.h2}>Add Custom Exercise</h3>
+                <button
+                  onClick={() => setShowAddExercise(false)}
+                  className="text-sm text-ink-muted hover:text-ink"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <form onSubmit={handleAddCustomExercise} className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Exercise Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="exercise_name"
+                    required
+                    className={styles.input}
+                    placeholder="e.g., Bicep Curls"
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Sets *
+                    </label>
+                    <input
+                      type="number"
+                      name="sets"
+                      required
+                      min="1"
+                      defaultValue="3"
+                      className={styles.input}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Reps *
+                    </label>
+                    <input
+                      type="text"
+                      name="reps"
+                      required
+                      defaultValue="10"
+                      className={styles.input}
+                      placeholder="e.g., 10 or 8-12"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Target Weight (kg)
+                    </label>
+                    <input
+                      type="number"
+                      name="target_weight"
+                      step="0.5"
+                      className={styles.input}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={addingExercise}
+                  className={`${styles.buttonPrimaryWorkout} w-full disabled:opacity-50`}
+                >
+                  {addingExercise ? "Adding..." : "Add Exercise"}
+                </button>
+              </form>
+            </div>
+          )}
+
           <button
-            onClick={handleCompleteDay}
+            onClick={handleToggleDayCompletion}
             disabled={completingDay}
-            className={`${styles.buttonPrimaryWorkout} w-full py-3 disabled:opacity-50`}
+            className={`flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50 ${
+              currentDay.completed 
+                ? styles.buttonSecondary 
+                : styles.buttonPrimaryWorkout
+            }`}
           >
-            {completingDay ? "Completing..." : "Complete Workout Day"}
+            {completingDay ? (
+              <>
+                <RefreshCw size={20} className="animate-spin" />
+                {currentDay.completed ? "Marking Incomplete..." : "Completing..."}
+              </>
+            ) : (
+              <>
+                {currentDay.completed ? (
+                  <>
+                    <XCircle size={20} />
+                    Mark Day as Incomplete
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={20} />
+                    Complete Workout Day
+                  </>
+                )}
+              </>
+            )}
           </button>
         </div>
+      )}
+
+      <AchievementCelebration
+        achievement={celebrationAchievement}
+        onClose={() => setCelebrationAchievement(null)}
+      />
+
+      {alternativeModalExercise && (
+        <AlternativeExerciseModal
+          exercise={alternativeModalExercise.exercise}
+          clientProgramDayExerciseId={alternativeModalExercise.clientProgramDayExerciseId}
+          onClose={() => setAlternativeModalExercise(null)}
+          onSwapped={reloadWorkout}
+        />
       )}
     </>
   );

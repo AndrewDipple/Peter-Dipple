@@ -77,6 +77,12 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     Record<string, boolean>
   >({});
 
+const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
+
+const [editExerciseValues, setEditExerciseValues] = useState<
+  Record<string, { sets: string; reps: string; weight: string }>
+>({});
+
   const sortedDays = useMemo(() => {
     return [...days].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }, [days]);
@@ -364,6 +370,65 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
       ),
     }));
   };
+const handleStartEditExercise = (exercise: ProgramTemplateExercise) => {
+  setEditingExerciseId(exercise.id);
+
+  setEditExerciseValues((prev) => ({
+    ...prev,
+    [exercise.id]: {
+      sets: exercise.sets ? String(exercise.sets) : "",
+      reps: exercise.reps ?? "",
+      weight:
+        exercise.target_weight_kg !== null &&
+        exercise.target_weight_kg !== undefined
+          ? String(exercise.target_weight_kg)
+          : "",
+    },
+  }));
+};
+
+const handleCancelEditExercise = (id: string) => {
+  setEditingExerciseId(null);
+
+  setEditExerciseValues((prev) => {
+    const next = { ...prev };
+    delete next[id];
+    return next;
+  });
+};
+
+const handleSaveExerciseEdit = async (
+  exercise: ProgramTemplateExercise,
+  dayId: string
+) => {
+  const values = editExerciseValues[exercise.id];
+  if (!values) return;
+
+  const { data, error } = await supabase
+    .from("program_template_exercises")
+    .update({
+      sets: values.sets ? Number(values.sets) : null,
+      reps: values.reps || null,
+      target_weight_kg: values.weight ? Number(values.weight) : null,
+    })
+    .eq("id", exercise.id)
+    .select()
+    .single();
+
+  if (error || !data) {
+    alert("Error saving exercise");
+    return;
+  }
+
+  setExercisesByDay((prev) => ({
+    ...prev,
+    [dayId]: prev[dayId].map((e) =>
+      e.id === exercise.id ? data : e
+    ),
+  }));
+
+  handleCancelEditExercise(exercise.id);
+};
 
   return (
     <>
@@ -606,35 +671,158 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                       {dayExercises.length === 0 ? (
                         <p className={styles.body}>No exercises added yet.</p>
                       ) : (
-                        dayExercises.map((exercise) => (
-                          <div
-                            key={exercise.id}
-                            className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3 md:flex-row md:items-center md:justify-between"
-                          >
-                            <div>
-                              <p className="font-medium text-ink">
-                                {exercise.exercise_name}
-                              </p>
-                              <p className="text-sm text-ink-muted">
-                                {exercise.sets ?? "-"} sets •{" "}
-                                {exercise.reps ?? "-"} reps
-                                {exercise.target_weight_kg !== null &&
-                                exercise.target_weight_kg !== undefined
-                                  ? ` • ${exercise.target_weight_kg} kg`
-                                  : ""}
-                              </p>
-                            </div>
+dayExercises.map((exercise) => {
+  const isEditing = editingExerciseId === exercise.id;
 
-                            <button
-                              onClick={() =>
-                                handleRemoveExercise(exercise.id, day.id)
-                              }
-                              className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))
+  const values = editExerciseValues[exercise.id] ?? {
+    sets:
+      exercise.sets !== null && exercise.sets !== undefined
+        ? String(exercise.sets)
+        : "",
+    reps: exercise.reps ?? "",
+    weight:
+      exercise.target_weight_kg !== null &&
+      exercise.target_weight_kg !== undefined
+        ? String(exercise.target_weight_kg)
+        : "",
+  };
+
+  return (
+    <div
+      key={exercise.id}
+      className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3"
+    >
+      {!isEditing ? (
+        // 🔹 NORMAL VIEW
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="font-medium text-ink">
+              {exercise.exercise_name}
+            </p>
+            <p className="text-sm text-ink-muted">
+              {exercise.sets ?? "-"} sets • {exercise.reps ?? "-"} reps
+              {exercise.target_weight_kg !== null &&
+              exercise.target_weight_kg !== undefined
+                ? ` • ${exercise.target_weight_kg} kg`
+                : ""}
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleStartEditExercise(exercise)}
+              className={styles.buttonSecondary}
+            >
+              Edit
+            </button>
+
+            <button
+              onClick={() =>
+                handleRemoveExercise(exercise.id, day.id)
+              }
+              className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        // 🔹 EDIT MODE
+        <div className="space-y-4">
+          <div>
+            <p className="font-medium text-ink">
+              {exercise.exercise_name}
+            </p>
+            <p className="text-sm text-ink-muted">
+              Edit exercise
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Sets
+              </label>
+              <input
+                type="number"
+                value={values.sets}
+                onChange={(e) =>
+                  setEditExerciseValues((prev) => ({
+                    ...prev,
+                    [exercise.id]: {
+                      ...values,
+                      sets: e.target.value,
+                    },
+                  }))
+                }
+                className={styles.input}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Reps
+              </label>
+              <input
+                value={values.reps}
+                onChange={(e) =>
+                  setEditExerciseValues((prev) => ({
+                    ...prev,
+                    [exercise.id]: {
+                      ...values,
+                      reps: e.target.value,
+                    },
+                  }))
+                }
+                className={styles.input}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-ink">
+                Weight (kg)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                value={values.weight}
+                onChange={(e) =>
+                  setEditExerciseValues((prev) => ({
+                    ...prev,
+                    [exercise.id]: {
+                      ...values,
+                      weight: e.target.value,
+                    },
+                  }))
+                }
+                className={styles.input}
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() =>
+                handleSaveExerciseEdit(exercise, day.id)
+              }
+              className={styles.buttonPrimary}
+            >
+              Save
+            </button>
+
+            <button
+              onClick={() => handleCancelEditExercise(exercise.id)}
+              className={styles.buttonSecondary}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+})
                       )}
                     </div>
                   </div>
