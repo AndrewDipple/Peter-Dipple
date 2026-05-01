@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { isStaff } from "@/lib/roles";
 
 type Recipe = {
   id: string;
@@ -48,11 +49,12 @@ function getRecipeTags(recipe: Recipe) {
   return tags;
 }
 
-export default function TrainerRecipeDetailPage({ params }: PageProps) {
+export default function RecipeDetailPage({ params }: PageProps) {
   const [recipeId, setRecipeId] = useState("");
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [ingredients, setIngredients] = useState<RecipeIngredient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
     const loadRecipe = async () => {
@@ -60,28 +62,37 @@ export default function TrainerRecipeDetailPage({ params }: PageProps) {
       const id = resolvedParams.id;
       setRecipeId(id);
 
-      const { data: recipeData, error: recipeError } = await supabase
-        .from("recipes")
-        .select("*")
-        .eq("id", id)
-        .single();
+      const [recipeRes, ingredientsRes, userRes] = await Promise.all([
+        supabase.from("recipes").select("*").eq("id", id).single(),
+        supabase
+          .from("recipe_ingredients")
+          .select("*")
+          .eq("recipe_id", id)
+          .order("created_at", { ascending: true }),
+        supabase.auth.getUser(),
+      ]);
 
-      if (!recipeError && recipeData) {
-        setRecipe(recipeData);
+      if (!recipeRes.error && recipeRes.data) {
+        setRecipe(recipeRes.data);
       } else {
         setRecipe(null);
       }
 
-      const { data: ingredientData, error: ingredientError } = await supabase
-        .from("recipe_ingredients")
-        .select("*")
-        .eq("recipe_id", id)
-        .order("created_at", { ascending: true });
-
-      if (!ingredientError && ingredientData) {
-        setIngredients(ingredientData);
+      if (!ingredientsRes.error && ingredientsRes.data) {
+        setIngredients(ingredientsRes.data);
       } else {
         setIngredients([]);
+      }
+
+      const user = userRes.data.user;
+      if (user) {
+        const { data: profileRow } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        setCanEdit(isStaff(profileRow?.role));
       }
 
       setLoading(false);
@@ -92,18 +103,18 @@ export default function TrainerRecipeDetailPage({ params }: PageProps) {
 
   const recipeTags = recipe ? getRecipeTags(recipe) : [];
 
-return (
+  return (
     <>
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/trainer/recipes" className={styles.buttonSecondary}>
+          <Link href="/recipes" className={styles.buttonSecondary}>
             ← Back
           </Link>
           <h1 className={styles.display}>Recipe Detail</h1>
         </div>
-        {recipeId && (
+        {canEdit && recipeId && (
           <Link
-            href={`/trainer/recipes/${recipeId}/edit`}
+            href={`/recipes/${recipeId}/edit`}
             className={styles.buttonPrimary}
           >
             Edit Recipe
@@ -146,7 +157,7 @@ return (
                 recipeTags.map((tag) => (
                   <span
                     key={tag}
-                    className="rounded-full border border-gold px-3 py-1 text-xs font-medium text-ink"
+                    className="rounded-full border border-emerald px-3 py-1 text-xs font-medium text-ink"
                   >
                     {tag}
                   </span>

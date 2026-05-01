@@ -48,7 +48,7 @@ export const styles = {
   /* ---------------------------------------------------------------- Buttons */
   /** Primary CTA — solid black, confident */
   buttonPrimary:
-    "rounded-md bg-ink px-4 py-2.5 font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50",
+    "rounded-md bg-black px-4 py-2.5 font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50",
 
   /** Section-specific primary buttons */
   buttonPrimaryWorkout: 
@@ -93,8 +93,8 @@ export const styles = {
   /* ---------------------------------------------------------------- Status */
   // Status pills — soft backgrounds, no borders, dot for visual signal
   statusGreen: "bg-emerald/10 text-emerald",
-  statusAmber: "bg-amber-100/70 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
-  statusRed:   "bg-rose-100/70 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
+  statusAmber: "bg-amber-100/70 text-black-800 dark:bg-amber-900/30 dark:text-black-300",
+  statusRed:   "bg-rose-100/70 text-black-00 dark:bg-rose-900/30 dark:text-black-300",
   statusDot: {
     green: "bg-emerald",
     amber: "bg-amber-500",

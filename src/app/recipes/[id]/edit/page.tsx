@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { isStaff } from "@/lib/roles";
 import Link from "next/link";
 
 type PageProps = {
@@ -35,9 +37,11 @@ type IngredientRow = {
 };
 
 export default function EditRecipePage({ params }: PageProps) {
+  const router = useRouter();
   const [recipeId, setRecipeId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -68,6 +72,31 @@ export default function EditRecipePage({ params }: PageProps) {
   useEffect(() => {
     const loadPage = async () => {
       setLoading(true);
+
+      // Role check first — bounce clients before fetching anything else.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!isStaff(profileRow?.role)) {
+        // Not a trainer or admin — send them to the recipe detail page.
+        const resolvedParams = await params;
+        router.replace(`/recipes/${resolvedParams.id}`);
+        return;
+      }
+
+      setAuthorized(true);
 
       const resolvedParams = await params;
       const id = resolvedParams.id;
@@ -134,7 +163,7 @@ export default function EditRecipePage({ params }: PageProps) {
     };
 
     loadPage();
-  }, [params]);
+  }, [params, router]);
 
   const addIngredientRow = () => {
     setIngredients((prev) => [
@@ -262,13 +291,17 @@ export default function EditRecipePage({ params }: PageProps) {
     }
 
     alert("Recipe updated!");
-    window.location.href = "/trainer/recipes";
+    router.push(`/recipes/${recipeId}`);
   };
 
-return (
+  // Don't render the form until we've confirmed the user is authorized.
+  // The redirect to /recipes/{id} will fire from the effect if they aren't.
+  if (!authorized && !loading) return null;
+
+  return (
     <>
       <div className="mb-6 flex items-center gap-4">
-        <Link href="/trainer/recipes" className={styles.buttonSecondary}>
+        <Link href={`/recipes/${recipeId}`} className={styles.buttonSecondary}>
           ← Back
         </Link>
         <h1 className={styles.display}>Edit Recipe</h1>

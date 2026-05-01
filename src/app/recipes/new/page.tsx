@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { isStaff } from "@/lib/roles";
 import Link from "next/link";
 
 type IngredientRow = {
@@ -13,6 +15,10 @@ type IngredientRow = {
 };
 
 export default function NewRecipePage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [calories, setCalories] = useState("");
@@ -33,6 +39,36 @@ export default function NewRecipePage() {
   const [ingredients, setIngredients] = useState<IngredientRow[]>([
     { ingredient_name: "", quantity: "", unit: "", note: "" },
   ]);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!isStaff(profileRow?.role)) {
+        // Not a trainer or admin — send them back to the recipe list.
+        router.replace("/recipes");
+        return;
+      }
+
+      setAuthorized(true);
+      setLoading(false);
+    };
+
+    checkAuth();
+  }, [router]);
 
   const addIngredientRow = () => {
     setIngredients((prev) => [
@@ -123,13 +159,20 @@ export default function NewRecipePage() {
     }
 
     alert("Recipe created!");
-    window.location.href = "/trainer/recipes";
+    router.push(`/recipes/${recipeData.id}`);
   };
 
-return (
+  if (!authorized && !loading) return null;
+  if (loading) {
+    return (
+      <p className={styles.body}>Loading...</p>
+    );
+  }
+
+  return (
     <>
       <div className="mb-6 flex items-center gap-4">
-        <Link href="/trainer/recipes" className={styles.buttonSecondary}>
+        <Link href="/recipes" className={styles.buttonSecondary}>
           ← Back
         </Link>
         <h1 className={styles.display}>New Recipe</h1>
@@ -301,7 +344,17 @@ return (
           </div>
         </div>
 
-
+        <div className={styles.card}>
+          <div className="flex items-center justify-between">
+            <h2 className={styles.h2}>Ingredients</h2>
+            <button
+              type="button"
+              onClick={addIngredientRow}
+              className={styles.buttonSecondary}
+            >
+              Add Ingredient
+            </button>
+          </div>
 
           <div className="mt-4 space-y-3">
             {ingredients.map((row, index) => (
@@ -382,17 +435,6 @@ return (
                 </div>
               </div>
             ))}
-                  <div className={styles.card}>
-          <div className="flex items-center justify-between">
-            <h2 className={styles.h2}>Ingredients</h2>
-            <button
-              type="button"
-              onClick={addIngredientRow}
-              className={styles.buttonSecondary}
-            >
-              Add Ingredient
-            </button>
-          </div>
           </div>
         </div>
 

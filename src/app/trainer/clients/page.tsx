@@ -19,73 +19,52 @@ export default function TrainerClientsPage() {
 
   useEffect(() => {
     const loadClients = async () => {
-      // First get all clients with their profile_ids
-      const { data: clientsData, error: clientsError } = await supabase
+      const { data, error } = await supabase
         .from("clients")
-        .select("id, full_name, email, profile_id")
+        .select("id, full_name, email, profile_id, profiles(last_sign_in_at)")
         .order("full_name", { ascending: true });
 
-      if (clientsError || !clientsData) {
+      if (error) {
+        console.error("clients query failed:", error);
         setLoading(false);
         return;
       }
 
-      // Get auth data for all clients
-      const clientsWithAuth = await Promise.all(
-        clientsData.map(async (client) => {
-          if (!client.profile_id) {
-            return { ...client, last_sign_in_at: null };
-          }
+      const flattened: Client[] = (data ?? []).map((c: any) => ({
+        id: c.id,
+        full_name: c.full_name,
+        email: c.email,
+        profile_id: c.profile_id,
+        last_sign_in_at: c.profiles?.last_sign_in_at ?? null,
+      }));
 
-          // Get last sign in from auth.users
-          const { data: authData } = await supabase
-            .from("profiles")
-            .select("last_sign_in_at")
-            .eq("id", client.profile_id)
-            .single();
-
-          return {
-            ...client,
-            last_sign_in_at: authData?.last_sign_in_at || null,
-          };
-        })
-      );
-
-      setClients(clientsWithAuth);
+      setClients(flattened);
       setLoading(false);
     };
 
     loadClients();
   }, []);
 
-  const getDaysSinceLogin = (lastSignIn: string | null) => {
-    if (!lastSignIn) return null;
+  const getLastActive = (lastSignIn: string | null) => {
+    if (!lastSignIn) {
+      return { text: "Never logged in", color: "text-red-600" };
+    }
 
-    const now = new Date();
-    const lastLogin = new Date(lastSignIn);
-    const diffMs = now.getTime() - lastLogin.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const days = Math.floor(
+      (Date.now() - new Date(lastSignIn).getTime()) / (1000 * 60 * 60 * 24)
+    );
 
-    return diffDays;
-  };
+    let text: string;
+    if (days === 0) text = "Active today";
+    else if (days === 1) text = "1 day ago";
+    else text = `${days} days ago`;
 
-  const getLastActiveText = (lastSignIn: string | null) => {
-    const days = getDaysSinceLogin(lastSignIn);
+    let color: string;
+    if (days <= 3) color = "text-green-600";
+    else if (days <= 7) color = "text-amber-600";
+    else color = "text-red-600";
 
-    if (days === null) return "Never logged in";
-    if (days === 0) return "Active today";
-    if (days === 1) return "1 day ago";
-    return `${days} days ago`;
-  };
-
-  const getLastActiveColor = (lastSignIn: string | null) => {
-    const days = getDaysSinceLogin(lastSignIn);
-
-    if (days === null) return "text-red-600";
-    if (days === 0) return "text-green-600";
-    if (days <= 3) return "text-green-600";
-    if (days <= 7) return "text-amber-600";
-    return "text-red-600"; // 8+ days
+    return { text, color };
   };
 
   return (
@@ -103,33 +82,34 @@ export default function TrainerClientsPage() {
         <p className={styles.body}>No clients found.</p>
       ) : (
         <div className="space-y-4">
-          {clients.map((client) => (
-            <Link
-              key={client.id}
-              href={`/trainer/clients/${client.id}`}
-              className="block"
-            >
-              <div className={`${styles.cardInteractive}`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h2 className={`text-lg font-semibold ${styles.goldText}`}>
-                      {client.full_name}
-                    </h2>
-                    <p className="mt-1 text-sm text-ink-muted">
-                      {client.email}
-                    </p>
-                  </div>
-                  
-                  <div className="text-right">
-                    <p className="text-xs font-medium text-ink-muted">Last Active</p>
-                    <p className={`mt-1 text-sm font-semibold ${getLastActiveColor(client.last_sign_in_at)}`}>
-                      {getLastActiveText(client.last_sign_in_at)}
-                    </p>
+          {clients.map((client) => {
+            const { text, color } = getLastActive(client.last_sign_in_at);
+            return (
+              <Link
+                key={client.id}
+                href={`/trainer/clients/${client.id}`}
+                className="block"
+              >
+                <div className={styles.cardInteractive}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h2 className={`text-lg font-semibold ${styles.goldText}`}>
+                        {client.full_name}
+                      </h2>
+                      <p className="mt-1 text-sm text-ink-muted">{client.email}</p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xs font-medium text-ink-muted">Last Active</p>
+                      <p className={`mt-1 text-sm font-semibold ${color}`}>
+                        {text}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
     </>

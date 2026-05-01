@@ -78,7 +78,7 @@ export default function LoginPage() {
 return (
     <main className="min-h-screen bg-surface-base flex items-center justify-center p-6">
       <div className="w-full max-w-md">
-        <h1 className={`${styles.display} text-center mb-6`}>Login</h1>
+        <h1 className={`${styles.display} text-center mb-6`}>Peter Training and Nutrition</h1>
 
         <div className={styles.card}>
           <form onSubmit={handleLogin} className="space-y-4">

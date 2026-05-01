@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import Logo from "./Logo";
 import { useTheme } from "@/contexts/ThemeContext";
+import { Role, isStaff } from "@/lib/roles";
 
 type NavItem = {
   href: string;
@@ -30,7 +31,7 @@ type NavItem = {
 const trainerNav: NavItem[] = [
   { href: "/trainer/dashboard", label: "Dashboard", icon: Home },
   { href: "/trainer/clients", label: "Clients", icon: Users },
-  { href: "/trainer/recipes", label: "Recipes", icon: ChefHat },
+  { href: "/recipes", label: "Recipes", icon: ChefHat },
   { href: "/trainer/program-templates", label: "Programmes", icon: ClipboardList },
   { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 },
 ];
@@ -48,7 +49,7 @@ const clientNav: NavItem[] = [
 ];
 
 type Props = {
-  userType: "client" | "trainer";
+  userType: Role;
   children: React.ReactNode;
 };
 
@@ -56,7 +57,8 @@ export default function AppShell({ userType, children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme } = useTheme();
-  const navItems = userType === "trainer" ? trainerNav : clientNav;
+  const navItems = isStaff(userType) ? trainerNav : clientNav;
+  const dashboardHref = isStaff(userType) ? "/trainer/dashboard" : "/client/dashboard";
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
@@ -89,37 +91,42 @@ export default function AppShell({ userType, children }: Props) {
 
       if (!user) return;
 
-      const { data: clientData } = await supabase
-        .from("clients")
-        .select("full_name, avatar_url")
-        .eq("profile_id", user.id)
-        .maybeSingle();
+      // Clients have their display data on the clients table.
+      // Trainers and admins have it on profiles.
+      if (isStaff(userType)) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url")
+          .eq("id", user.id)
+          .maybeSingle();
 
-      if (clientData?.full_name) {
-        setDisplayName(clientData.full_name);
-        setAvatarUrl(clientData.avatar_url);
-        return;
+        if (profileData?.full_name) {
+          setDisplayName(profileData.full_name);
+          setAvatarUrl(profileData.avatar_url);
+          return;
+        }
+      } else {
+        const { data: clientData } = await supabase
+          .from("clients")
+          .select("full_name, avatar_url")
+          .eq("profile_id", user.id)
+          .maybeSingle();
+
+        if (clientData?.full_name) {
+          setDisplayName(clientData.full_name);
+          setAvatarUrl(clientData.avatar_url);
+          return;
+        }
       }
 
-      const { data: trainerData } = await supabase
-        .from("trainers")
-        .select("full_name, avatar_url")
-        .eq("profile_id", user.id)
-        .maybeSingle();
-
-      if (trainerData?.full_name) {
-        setDisplayName(trainerData.full_name);
-        setAvatarUrl(trainerData.avatar_url);
-        return;
-      }
-
+      // Fallback: use the email prefix if we can't find a name.
       if (user.email) {
         setDisplayName(user.email.split("@")[0]);
       }
     };
 
     fetchProfile();
-  }, []);
+  }, [userType]);
 
   useEffect(() => {
     const checkNotifications = async () => {
@@ -239,7 +246,7 @@ export default function AppShell({ userType, children }: Props) {
         style={{ backgroundColor: theme === "dark" ? "#D4AF37" : "#111111" }}
       >
         <div className="mx-auto flex h-18 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
-          <Link href={`/${userType}/dashboard`} className="flex h-full shrink-0 items-center">
+          <Link href={dashboardHref} className="flex h-full shrink-0 items-center">
             <div className="flex h-16 w-16 items-center">
               <Logo />
             </div>
@@ -411,7 +418,7 @@ export default function AppShell({ userType, children }: Props) {
                   }}
                   className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2.5 font-medium text-black transition hover:bg-gray-100"
                 >
-                  Cancel
+Cancel
                 </button>
               </div>
             </div>

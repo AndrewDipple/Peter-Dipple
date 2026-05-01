@@ -34,7 +34,7 @@ export default function InstallPrompt() {
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      
+
       // Show prompt after 30 seconds (so they get to explore first)
       setTimeout(() => {
         setShowPrompt(true);
@@ -66,35 +66,64 @@ export default function InstallPrompt() {
     localStorage.setItem('install-prompt-dismissed', 'true');
   };
 
+  // Shared card styling — opaque, theme-aware, with strong contrast in both modes.
+  // Light mode: white card, dark text. Dark mode: near-black card, light text.
+  const cardClasses =
+    "relative rounded-xl border border-gold p-4 shadow-2xl " +
+    "bg-white text-gray-900 " +
+    "dark:bg-neutral-900 dark:text-white";
+
+  const closeButtonClasses =
+    "absolute right-2 top-2 rounded-lg p-1 " +
+    "text-gray-500 hover:bg-gray-100 hover:text-gray-900 " +
+    "dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white";
+
+  const subTextClasses = "mt-1 text-sm text-gray-600 dark:text-white/80";
+
+  const tipBoxClasses =
+    "mt-3 flex items-start gap-3 rounded-lg p-3 " +
+    "bg-gray-100 text-gray-800 " +
+    "dark:bg-white/10 dark:text-white/90";
+
+  const secondaryButtonClasses =
+    "rounded-lg border px-4 py-2 text-sm font-medium " +
+    "border-gray-300 text-gray-700 hover:bg-gray-100 " +
+    "dark:border-white/20 dark:text-white dark:hover:bg-white/10";
+
   // iOS Prompt
   if (showIOSPrompt) {
     return (
       <div className="fixed bottom-4 left-4 right-4 z-[200] mx-auto max-w-md">
-        <div className="rounded-xl border border-gold bg-ink p-4 shadow-2xl">
+        <div className={cardClasses}>
           <button
             onClick={handleDismiss}
-            className="absolute right-2 top-2 rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
+            className={closeButtonClasses}
+            aria-label="Dismiss"
           >
             <X size={16} />
           </button>
 
           <div className="pr-6">
-            <p className="font-semibold text-white">Install PT App</p>
-            <p className="mt-1 text-sm text-white/80">
+            <p className="font-semibold">Install PT App</p>
+            <p className={subTextClasses}>
               Install the app for quick access and offline workout logging
             </p>
 
-            <div className="mt-3 flex items-start gap-3 rounded-lg bg-white/10 p-3">
+            <div className={tipBoxClasses}>
               <Share size={20} className="mt-0.5 flex-shrink-0 text-gold" />
-              <div className="text-sm text-white/90">
-                <p>Tap the <strong>Share</strong> button below</p>
-                <p className="mt-1">Then select <strong>"Add to Home Screen"</strong></p>
+              <div className="text-sm">
+                <p>
+                  Tap the <strong>Share</strong> button
+                </p>
+                <p className="mt-1">
+                  Then select <strong>"Add to Home Screen"</strong>
+                </p>
               </div>
             </div>
 
             <button
               onClick={handleDismiss}
-              className="mt-3 w-full rounded-lg border border-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
+              className={`${secondaryButtonClasses} mt-3 w-full`}
             >
               Got it
             </button>
@@ -109,17 +138,18 @@ export default function InstallPrompt() {
 
   return (
     <div className="fixed bottom-4 left-4 right-4 z-[200] mx-auto max-w-md">
-      <div className="rounded-xl border border-gold bg-ink p-4 shadow-2xl">
+      <div className={cardClasses}>
         <button
           onClick={handleDismiss}
-          className="absolute right-2 top-2 rounded-lg p-1 text-white/60 hover:bg-white/10 hover:text-white"
+          className={closeButtonClasses}
+          aria-label="Dismiss"
         >
           <X size={16} />
         </button>
 
         <div className="pr-6">
-          <p className="font-semibold text-white">Install PT App</p>
-          <p className="mt-1 text-sm text-white/80">
+          <p className="font-semibold">Install PT App</p>
+          <p className={subTextClasses}>
             Install the app for quick access and offline workout logging
           </p>
 
@@ -130,10 +160,7 @@ export default function InstallPrompt() {
             >
               Install
             </button>
-            <button
-              onClick={handleDismiss}
-              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
-            >
+            <button onClick={handleDismiss} className={secondaryButtonClasses}>
               Not now
             </button>
           </div>

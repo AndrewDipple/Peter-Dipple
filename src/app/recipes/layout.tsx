@@ -3,50 +3,43 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { isStaff } from "@/lib/roles";
+import AppShell from "@/components/AppShell";
+import { Role } from "@/lib/roles";
 
-export default function TrainerGuard({
+export default function RecipesLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const [role, setRole] = useState<Role | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const loadRole = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        router.push("/login");
+        router.replace("/login");
         return;
       }
 
-      // Check if user is staff (trainer or admin)
-      const { data: profile } = await supabase
+      const { data: profileRow } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (!isStaff(profile?.role)) {
-        // User is authenticated but not staff
-        setLoading(false);
-        setAuthorized(false);
-        return;
-      }
-
-      setAuthorized(true);
+      setRole((profileRow?.role as Role) ?? "client");
       setLoading(false);
     };
 
-    checkAuth();
+    loadRole();
   }, [router]);
 
-  if (loading) {
+  if (loading || !role) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-ink-muted">Loading...</p>
@@ -54,13 +47,5 @@ export default function TrainerGuard({
     );
   }
 
-  if (!authorized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-ink-muted">Access denied</p>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
+  return <AppShell userType={role}>{children}</AppShell>;
 }
