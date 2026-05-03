@@ -88,6 +88,8 @@ export default function ClientMealPlannerPage() {
   const [movingMealId, setMovingMealId] = useState<string | null>(null);
   const [removingMealId, setRemovingMealId] = useState<string | null>(null);
 
+  const [copyingWeek, setCopyingWeek] = useState(false);
+
   // Resolve focused date from URL or default to today.
   const focusedDate = useMemo(() => {
     const param = searchParams.get("date");
@@ -274,9 +276,70 @@ export default function ClientMealPlannerPage() {
       alert("Error moving meal");
       return;
     }
+    
+
+
 
     await loadPage();
   };
+
+  const handleCopyLastWeek = async () => {
+  if (!client) return;
+
+  const lastWeekStart = addDays(weekStart, -7);
+  const lastWeekEnd = addDays(weekStart, -1);
+
+  setCopyingWeek(true);
+
+  // Fetch last week's meals.
+  const { data: lastWeekMeals, error: fetchError } = await supabase
+    .from("meal_plans")
+    .select("recipe_id, planned_date, quantity")
+    .eq("client_id", client.id)
+    .gte("planned_date", lastWeekStart)
+    .lte("planned_date", lastWeekEnd);
+
+  if (fetchError) {
+    alert("Could not read last week's meals.");
+    setCopyingWeek(false);
+    return;
+  }
+
+  if (!lastWeekMeals || lastWeekMeals.length === 0) {
+    alert("Last week has no meals to copy.");
+    setCopyingWeek(false);
+    return;
+  }
+
+  const count = lastWeekMeals.length;
+  const confirmed = window.confirm(
+    `Copy ${count} meal${count === 1 ? "" : "s"} from last week into this week? Existing meals will be kept.`
+  );
+
+  if (!confirmed) {
+    setCopyingWeek(false);
+    return;
+  }
+
+  // Build the new rows — shift each planned_date forward by 7 days.
+  const newRows = lastWeekMeals.map((m: any) => ({
+    client_id: client.id,
+    recipe_id: m.recipe_id,
+    planned_date: addDays(m.planned_date, 7),
+    quantity: m.quantity ?? 1,
+  }));
+
+  const { error: insertError } = await supabase.from("meal_plans").insert(newRows);
+
+  if (insertError) {
+    alert(`Could not copy meals: ${insertError.message}`);
+    setCopyingWeek(false);
+    return;
+  }
+
+  setCopyingWeek(false);
+  await loadPage();
+};
 
   // --- Daily summary ---
 
@@ -307,43 +370,54 @@ export default function ClientMealPlannerPage() {
       </div>
 
       {/* Week selector */}
-      <div className={`${styles.card} bg-surface-sunken`}>
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={goToPreviousWeek}
-            className={styles.buttonSecondary}
-            aria-label="Previous week"
-          >
-            <ChevronLeft size={16} />
-          </button>
+<div className={`${styles.card} bg-surface-sunken`}>
+  <div className="flex items-center justify-between gap-3">
+    <button
+      type="button"
+      onClick={goToPreviousWeek}
+      className={styles.buttonSecondary}
+      aria-label="Previous week"
+    >
+      <ChevronLeft size={16} />
+    </button>
 
-          <div className="text-center">
-            <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Week of</p>
-            <p className="text-base font-semibold text-ink md:text-lg">
-              {formatWeekLabel(weekStart)}
-            </p>
-            {!isCurrentWeek && (
-              <button
-                type="button"
-                onClick={goToThisWeek}
-                className="mt-1 text-xs font-medium text-emerald hover:underline"
-              >
-                Jump to this week
-              </button>
-            )}
-          </div>
+    <div className="text-center">
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">Week of</p>
+      <p className="text-base font-semibold text-ink md:text-lg">
+        {formatWeekLabel(weekStart)}
+      </p>
+      {!isCurrentWeek && (
+        <button
+          type="button"
+          onClick={goToThisWeek}
+          className="mt-1 text-xs font-medium text-emerald hover:underline"
+        >
+          Jump to this week
+        </button>
+      )}
+    </div>
 
-          <button
-            type="button"
-            onClick={goToNextWeek}
-            className={styles.buttonSecondary}
-            aria-label="Next week"
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      </div>
+    <button
+      type="button"
+      onClick={goToNextWeek}
+      className={styles.buttonSecondary}
+      aria-label="Next week"
+    >
+      <ChevronRight size={16} />
+    </button>
+  </div>
+
+  <div className="mt-3 flex justify-center border-t border-border-subtle pt-3">
+    <button
+      type="button"
+      onClick={handleCopyLastWeek}
+      disabled={copyingWeek}
+      className="text-sm font-medium text-emerald hover:underline disabled:opacity-50 disabled:no-underline"
+    >
+      {copyingWeek ? "Copying..." : "Copy from last week"}
+    </button>
+  </div>
+</div>
 
       {loading ? (
         <p className={`${styles.body} mt-6`}>Loading planner...</p>

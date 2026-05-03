@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { updateStreak } from "@/lib/streaks";
+import {
+  isCompanionEnabledForClient,
+  getActiveCompanionView,
+  getRandomLine,
+  type ActiveCompanionView,
+} from "@/lib/companions";
 import AchievementCelebration from "@/components/AchievementCelebration";
 import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
@@ -113,6 +119,13 @@ export default function ClientWorkoutPage() {
   const [addingExercise, setAddingExercise] = useState(false);
   const [swappingBack, setSwappingBack] = useState<string | null>(null);
 
+  // Companion state — flag-gated, only populated if enabled.
+  const [companionEnabled, setCompanionEnabled] = useState(false);
+  const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
+  const [restCount, setRestCount] = useState(0);
+  const [companionLine, setCompanionLine] = useState<string | null>(null);
+  const lastLineRef = useRef<string | null>(null);
+
   const today = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
@@ -162,6 +175,15 @@ export default function ClientWorkoutPage() {
     }
 
     setClient(clientData);
+
+    // Companion (only if enabled for this client) — runs in parallel with program load below.
+    const isEnabled = await isCompanionEnabledForClient(clientData.id);
+    setCompanionEnabled(isEnabled);
+
+    if (isEnabled) {
+      const cv = await getActiveCompanionView(clientData.id);
+      setCompanionView(cv);
+    }
 
     const { data: clientProgramData, error: clientProgramError } =
       await supabase
@@ -278,7 +300,16 @@ export default function ClientWorkoutPage() {
       }));
 
       setDayExercises(enrichedExercises);
-      setActiveExerciseId(enrichedExercises[0]?.id ?? "");
+
+      // Only set the active exercise if there isn't one already, OR if the
+      // current active exercise isn't in this day's exercises (e.g. switched days).
+      // This prevents the "jumps back to first exercise after marking a set" bug.
+      setActiveExerciseId((current) => {
+        if (current && enrichedExercises.some((e) => e.id === current)) {
+          return current;
+        }
+        return enrichedExercises[0]?.id ?? "";
+      });
 
       const exerciseRecordIds = enrichedExercises.map((e) => e.id);
 
@@ -607,6 +638,32 @@ export default function ClientWorkoutPage() {
         secondsRemaining: exercise.exercise_details.rest,
         totalSeconds: exercise.exercise_details.rest,
       });
+
+      // Companion speaks on rest 1, then every 5th rest of the session.
+      const newRestCount = restCount + 1;
+      setRestCount(newRestCount);
+
+      if (
+        companionEnabled &&
+        companionView &&
+        (newRestCount === 1 || newRestCount % 5 === 0)
+      ) {
+        const slug = companionView.path.slug;
+
+        // Try a couple of times to avoid immediate repeats.
+        let line = await getRandomLine(slug, "rest_timer");
+        if (line && line === lastLineRef.current) {
+          const second = await getRandomLine(slug, "rest_timer");
+          if (second) line = second;
+        }
+
+        if (line) {
+          setCompanionLine(line);
+          lastLineRef.current = line;
+        }
+      } else {
+        setCompanionLine(null);
+      }
     }
   };
 
@@ -830,26 +887,49 @@ export default function ClientWorkoutPage() {
 
       {restTimer && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-workout px-4 py-3 text-white shadow-lg">
-          <div className="mx-auto flex max-w-7xl items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Rest Timer</p>
-              <p className="text-xs opacity-90">
-                Set {restTimer.setNumber} complete
-              </p>
+          <div className="mx-auto max-w-7xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Rest Timer</p>
+                <p className="text-xs opacity-90">
+                  Set {restTimer.setNumber} complete
+                </p>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <p className="text-2xl font-bold tabular-nums">
+                  {formatTime(restTimer.secondsRemaining)}
+                </p>
+
+                <button
+                  onClick={() => {
+                    setRestTimer(null);
+                    setCompanionLine(null);
+                  }}
+                  className="rounded-lg bg-white/20 px-3 py-1 text-sm font-medium hover:bg-white/30"
+                >
+                  Skip
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              <p className="text-2xl font-bold tabular-nums">
-                {formatTime(restTimer.secondsRemaining)}
-              </p>
-
-              <button
-                onClick={() => setRestTimer(null)}
-                className="rounded-lg bg-white/20 px-3 py-1 text-sm font-medium hover:bg-white/30"
-              >
-                Skip
-              </button>
-            </div>
+            {/* Companion speaks — only on cadence rests */}
+            {companionEnabled && companionView && companionLine && (
+              <div className="mt-2 flex items-center gap-2 border-t border-white/20 pt-2">
+                {companionView.currentForm.image_url ? (
+                  <img
+                    src={companionView.currentForm.image_url}
+                    alt={companionView.currentForm.name}
+                    className="h-8 w-8 shrink-0 rounded-full border border-white/30 object-cover"
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/30 bg-white/10 text-xs">
+                    ?
+                  </div>
+                )}
+                <p className="text-sm italic opacity-95">"{companionLine}"</p>
+              </div>
+            )}
           </div>
         </div>
       )}

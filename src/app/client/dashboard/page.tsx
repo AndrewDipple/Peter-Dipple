@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { todayStr } from "@/lib/dates";
 import { updateStreak, checkStreakReminders } from "@/lib/streaks";
-import StreakDisplay from "@/components/StreakDisplay";
-import Leaderboard from "@/components/Leaderboard";
+import {
+  getActiveCompanionView,
+  isCompanionEnabledForClient,
+  type ActiveCompanionView,
+} from "@/lib/companions";
+// import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch — see commit notes.
+// import Leaderboard from "@/components/Leaderboard";     // Removed for launch — competitive mechanics deferred.
+import { Sparkles } from "lucide-react";
 
 type Client = {
   id: string;
@@ -80,6 +88,8 @@ type ClientMilestone = {
 };
 
 export default function ClientDashboardPage() {
+  const router = useRouter();
+
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
   const [currentDay, setCurrentDay] = useState<ClientProgramDay | null>(null);
@@ -103,7 +113,11 @@ export default function ClientDashboardPage() {
   const [sideFile, setSideFile] = useState<File | null>(null);
   const [submittingMilestone, setSubmittingMilestone] = useState(false);
 
-  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
+  // Companion widget state — only populated if companion feature is enabled.
+  const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
+  const [companionEnabled, setCompanionEnabled] = useState(false);
+
+  const today = useMemo(() => todayStr(), []);
 
   const completedExercises = useMemo(() => {
     return dayExercises.filter((exercise) => {
@@ -201,7 +215,7 @@ export default function ClientDashboardPage() {
     }
 
     if (clientData.onboarding_complete === false) {
-      window.location.href = "/onboarding";
+      router.replace("/onboarding");
       return;
     }
 
@@ -241,7 +255,7 @@ export default function ClientDashboardPage() {
       .limit(1);
 
     if (!clientProgramError && (!clientProgramData || clientProgramData.length === 0)) {
-      window.location.href = "/onboarding";
+      router.replace("/onboarding");
       return;
     }
 
@@ -354,6 +368,18 @@ export default function ClientDashboardPage() {
     }
 
     setTodayCalories(recipeCaloriesTotal + customCaloriesTotal);
+
+    // --- Companion (only if feature enabled for this client) ---
+    const isEnabled = await isCompanionEnabledForClient(clientData.id);
+    setCompanionEnabled(isEnabled);
+
+    if (isEnabled) {
+      const cv = await getActiveCompanionView(clientData.id);
+      setCompanionView(cv);
+    } else {
+      setCompanionView(null);
+    }
+
     setLoading(false);
   };
 
@@ -549,7 +575,7 @@ export default function ClientDashboardPage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    window.location.href = "/login";
+    router.replace("/login");
   };
 
   return (
@@ -727,13 +753,79 @@ export default function ClientDashboardPage() {
               </p>
             </Link>
 
-            <div className="min-w-0">
-              <StreakDisplay clientId={client.id} />
-            </div>
+            {/* Companion widget — only renders if companion feature is enabled for this client */}
+            {companionEnabled && (
+              <Link
+                href="/client/companion"
+                className={`${styles.cardInteractive} block min-w-0 bg-surface-sunken`}
+              >
+                {companionView ? (
+                  <div className="flex items-center gap-4">
+                    {companionView.currentForm.image_url ? (
+                      <img
+                        src={companionView.currentForm.image_url}
+                        alt={companionView.currentForm.name}
+                        className="h-16 w-16 shrink-0 rounded-lg border border-border-subtle object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface text-2xl">
+                        ?
+                      </div>
+                    )}
 
-            <div className="min-w-0">
-              <Leaderboard currentClientId={client.id} />
-            </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-ink-muted">Your Companion</p>
+                      <p className="mt-1 break-words text-lg font-semibold text-ink">
+                        {companionView.companion.custom_name ??
+                          companionView.path.default_name ??
+                          companionView.path.name}
+                      </p>
+                      <p className="mt-1 text-sm text-emerald">
+                        {companionView.currentForm.name}
+                      </p>
+
+                      {companionView.nextForm ? (
+                        <>
+                          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white">
+                            <div
+                              className="h-full rounded-full bg-emerald transition-all"
+                              style={{ width: `${companionView.progressPct}%` }}
+                            />
+                          </div>
+                          <p className="mt-2 text-xs text-ink-muted">
+                            {companionView.xpToNextForm} XP to {companionView.nextForm.name}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="mt-2 flex items-center gap-1 text-xs font-medium text-emerald">
+                          <Sparkles size={12} /> Mastered
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-ink-muted">Companion</p>
+                    <p className="mt-1 break-words text-lg font-semibold text-ink">
+                      Choose a companion to start your journey
+                    </p>
+                    <p className="mt-2 text-sm text-ink-muted">
+                      A small sidekick that grows alongside you
+                    </p>
+                  </>
+                )}
+              </Link>
+            )}
+
+            {/* StreakDisplay hidden for launch — kept rendered=false so the underlying
+                streak mechanic still records data in the background. Re-enable by
+                uncommenting the import and the line below. */}
+            {/* <div className="min-w-0">
+              <StreakDisplay clientId={client.id} />
+            </div> */}
+
+            {/* Leaderboard removed for launch — competitive mechanics deferred.
+                Component file remains in /components for future use. */}
           </div>
         )}
       </div>
