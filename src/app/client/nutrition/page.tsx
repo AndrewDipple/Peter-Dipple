@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { updateStreak } from "@/lib/streaks";
+import { awardBondXp } from "@/lib/companions";
 import {
   todayStr,
   addDays,
@@ -278,49 +279,51 @@ export default function ClientNutritionPage() {
     } as MealLog;
   };
 
-  const handleLogPlannedMeal = async (chipPlannedId: string, recipeId: string) => {
-    if (!clientId) return;
-    setLoggingPlannedId(chipPlannedId);
+ const handleLogPlannedMeal = async (chipPlannedId: string, recipeId: string) => {
+  if (!clientId) return;
+  setLoggingPlannedId(chipPlannedId);
 
-    const inserted = await insertMealLog(recipeId);
+  const inserted = await insertMealLog(recipeId);
 
-    if (!inserted) {
-      alert("Error logging meal");
-      setLoggingPlannedId(null);
-      return;
-    }
-
-    setMealLogs((prev) => [inserted, ...prev]);
+  if (!inserted) {
+    alert("Error logging meal");
     setLoggingPlannedId(null);
+    return;
+  }
 
-    await updateStreak(clientId, "nutrition", selectedDate);
-  };
+  setMealLogs((prev) => [inserted, ...prev]);
+  setLoggingPlannedId(null);
 
-  const handleAddRecipeMeal = async () => {
-    if (!clientId) {
-      alert("Client not found");
-      return;
-    }
-    if (!selectedRecipeId) {
-      alert("Please choose a recipe");
-      return;
-    }
+  await updateStreak(clientId, "nutrition", selectedDate);
+  await awardBondXp(clientId, 10, "logged_planned_meal", "Logged a planned meal");
+};
 
-    setAddingRecipe(true);
-    const inserted = await insertMealLog(selectedRecipeId);
+const handleAddRecipeMeal = async () => {
+  if (!clientId) {
+    alert("Client not found");
+    return;
+  }
+  if (!selectedRecipeId) {
+    alert("Please choose a recipe");
+    return;
+  }
 
-    if (!inserted) {
-      alert("Error adding recipe meal");
-      setAddingRecipe(false);
-      return;
-    }
+  setAddingRecipe(true);
+  const inserted = await insertMealLog(selectedRecipeId);
 
-    setMealLogs((prev) => [inserted, ...prev]);
-    setSelectedRecipeId("");
+  if (!inserted) {
+    alert("Error adding recipe meal");
     setAddingRecipe(false);
+    return;
+  }
 
-    await updateStreak(clientId, "nutrition", selectedDate);
-  };
+  setMealLogs((prev) => [inserted, ...prev]);
+  setSelectedRecipeId("");
+  setAddingRecipe(false);
+
+  await updateStreak(clientId, "nutrition", selectedDate);
+  await awardBondXp(clientId, 10, "logged_off_plan_meal", "Logged an off-plan recipe meal");
+};
 
   const handleRemoveRecipeMeal = async (mealId: string) => {
     setRemovingMealId(mealId);
@@ -334,46 +337,47 @@ export default function ClientNutritionPage() {
     setRemovingMealId(null);
   };
 
-  const handleAddCustomMeal = async () => {
-    if (!clientId) {
-      alert("Client not found");
-      return;
-    }
-    if (customMealName.trim() === "" || customMealCalories.trim() === "") {
-      alert("Please add a meal name and calories");
-      return;
-    }
+const handleAddCustomMeal = async () => {
+  if (!clientId) {
+    alert("Client not found");
+    return;
+  }
+  if (customMealName.trim() === "" || customMealCalories.trim() === "") {
+    alert("Please add a meal name and calories");
+    return;
+  }
 
-    setSavingCustomMeal(true);
+  setSavingCustomMeal(true);
 
-    const { data, error } = await supabase
-      .from("custom_meal_logs")
-      .insert([
-        {
-          client_id: clientId,
-          meal_name: customMealName.trim(),
-          calories: Number(customMealCalories),
-          log_date: selectedDate,
-          note: customMealNote.trim() || null,
-        },
-      ])
-      .select()
-      .single();
+  const { data, error } = await supabase
+    .from("custom_meal_logs")
+    .insert([
+      {
+        client_id: clientId,
+        meal_name: customMealName.trim(),
+        calories: Number(customMealCalories),
+        log_date: selectedDate,
+        note: customMealNote.trim() || null,
+      },
+    ])
+    .select()
+    .single();
 
-    if (error) {
-      alert("Error saving custom meal");
-      setSavingCustomMeal(false);
-      return;
-    }
-
-    setCustomMeals((prev) => [data, ...prev]);
-    setCustomMealName("");
-    setCustomMealCalories("");
-    setCustomMealNote("");
+  if (error) {
+    alert("Error saving custom meal");
     setSavingCustomMeal(false);
+    return;
+  }
 
-    await updateStreak(clientId, "nutrition", selectedDate);
-  };
+  setCustomMeals((prev) => [data, ...prev]);
+  setCustomMealName("");
+  setCustomMealCalories("");
+  setCustomMealNote("");
+  setSavingCustomMeal(false);
+
+  await updateStreak(clientId, "nutrition", selectedDate);
+  await awardBondXp(clientId, 10, "logged_custom_meal", "Logged a custom meal");
+};
 
   const handleRemoveCustomMeal = async (mealId: string) => {
     setRemovingCustomMealId(mealId);

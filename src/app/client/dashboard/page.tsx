@@ -10,6 +10,7 @@ import { updateStreak, checkStreakReminders } from "@/lib/streaks";
 import {
   getActiveCompanionView,
   isCompanionEnabledForClient,
+  awardBondXp,
   type ActiveCompanionView,
 } from "@/lib/companions";
 // import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch — see commit notes.
@@ -383,54 +384,70 @@ export default function ClientDashboardPage() {
     setLoading(false);
   };
 
-  const handleSaveSteps = async () => {
-    if (!client) return;
+const handleSaveSteps = async () => {
+  if (!client) return;
 
-    const steps = parseInt(stepsInput);
+  const steps = parseInt(stepsInput);
 
-    if (isNaN(steps) || steps < 0) {
-      alert("Please enter a valid step count");
+  if (isNaN(steps) || steps < 0) {
+    alert("Please enter a valid step count");
+    return;
+  }
+
+  setSavingSteps(true);
+
+  // Capture the previous step count before we update, so we can detect
+  // whether this save crosses the target threshold for the first time today.
+  const previousSteps = dailyTracking?.steps_logged ?? 0;
+  const target = client.daily_step_target;
+  const crossingTarget = previousSteps < target && steps >= target;
+
+  if (dailyTracking) {
+    const { error } = await supabase
+      .from("daily_tracking")
+      .update({ steps_logged: steps })
+      .eq("id", dailyTracking.id);
+
+    if (error) {
+      alert("Error saving steps");
+      setSavingSteps(false);
       return;
     }
 
-    setSavingSteps(true);
+    setDailyTracking({ ...dailyTracking, steps_logged: steps });
+  } else {
+    const { data, error } = await supabase
+      .from("daily_tracking")
+      .insert({
+        client_id: client.id,
+        log_date: today,
+        steps_logged: steps,
+        water_completed: false,
+      })
+      .select()
+      .single();
 
-    if (dailyTracking) {
-      const { error } = await supabase
-        .from("daily_tracking")
-        .update({ steps_logged: steps })
-        .eq("id", dailyTracking.id);
-
-      if (error) {
-        alert("Error saving steps");
-        setSavingSteps(false);
-        return;
-      }
-
-      setDailyTracking({ ...dailyTracking, steps_logged: steps });
-    } else {
-      const { data, error } = await supabase
-        .from("daily_tracking")
-        .insert({
-          client_id: client.id,
-          log_date: today,
-          steps_logged: steps,
-          water_completed: false,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        alert("Error saving steps");
-        setSavingSteps(false);
-        return;
-      }
-
-      setDailyTracking(data);
+    if (error) {
+      alert("Error saving steps");
+      setSavingSteps(false);
+      return;
     }
 
-    setSavingSteps(false);
-  };
+    setDailyTracking(data);
+  }
+
+  // Award Bond XP only when the target is crossed for the first time today.
+  if (crossingTarget) {
+    await awardBondXp(
+      client.id,
+      20,
+      "steps_target_hit",
+      "Daily step target hit"
+    );
+  }
+
+  setSavingSteps(false);
+};
 
   const handleToggleWater = async () => {
     if (!client) return;
@@ -473,11 +490,21 @@ export default function ClientDashboardPage() {
       setDailyTracking(data);
     }
 
-    if (newWaterStatus) {
-      await updateStreak(client.id, "water", today);
-    }
+if (newWaterStatus) {
+  await updateStreak(client.id, "water", today);
 
-    setTogglingWater(false);
+  // Award Bond XP — only fires on false→true transition (we're inside the
+  // newWaterStatus block, so this is the moment of crossing). Self-disabling
+  // if companions aren't enabled for this client.
+  await awardBondXp(
+    client.id,
+    15,
+    "water_complete",
+    "Daily water target hit"
+  );
+}
+
+setTogglingWater(false);
   };
 
   const handleSubmitMilestone = async () => {
@@ -541,22 +568,33 @@ export default function ClientDashboardPage() {
         }
       }
 
-      const { error: updateError } = await supabase
-        .from("client_milestones")
-        .update({
-          questionnaire_completed: milestoneConfig.requires_questionnaire,
-          questionnaire_responses: milestoneConfig.requires_questionnaire
-            ? questionnaireAnswers
-            : null,
-          photos_completed: milestoneConfig.requires_photos,
-          photo_log_date: photoLogDate,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", clientMilestone.id);
+const { error: updateError } = await supabase
+  .from("client_milestones")
+  .update({
+    questionnaire_completed: milestoneConfig.requires_questionnaire,
+    questionnaire_responses: milestoneConfig.requires_questionnaire
+      ? questionnaireAnswers
+      : null,
+    photos_completed: milestoneConfig.requires_photos,
+    photo_log_date: photoLogDate,
+    completed_at: new Date().toISOString(),
+  })
+  .eq("id", clientMilestone.id);
 
-      if (updateError) throw updateError;
+if (updateError) throw updateError;
 
-      alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
+// Award Bond XP for completing the milestone. Self-disabling if companions
+// aren't enabled. The milestone can only be completed once per week (the
+// flag flip is idempotent), so no extra check needed for repeat awards.
+await awardBondXp(
+  client.id,
+  200,
+  `milestone_week_${milestoneConfig.week_number}`,
+  `Completed Week ${milestoneConfig.week_number} milestone`
+);
+
+alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
+
       setShowMilestoneModal(false);
       setQuestionnaireAnswers({});
       setFrontFile(null);
@@ -734,7 +772,7 @@ export default function ClientDashboardPage() {
               <p className="mt-1 break-words text-lg font-semibold text-ink">
                 {latestWeight
                   ? `Latest weight: ${latestWeight.weight_kg} kg`
-                  : "Track weight, measurements, and progress photos"}
+                  : "Track weight, measurements and progress photos"}
               </p>
 
               <div className="mt-3 h-20 rounded-xl bg-white/70 p-3">
@@ -918,7 +956,7 @@ export default function ClientDashboardPage() {
                 <div>
                   <h3 className="mb-3 font-semibold text-ink">Progress Photos</h3>
                   <p className="mb-3 text-sm text-ink-muted">
-                    Upload Front, Back, and Side photos
+                    Upload Front, Back and Side photos
                   </p>
 
                   <div className="grid min-w-0 gap-3 md:grid-cols-3">

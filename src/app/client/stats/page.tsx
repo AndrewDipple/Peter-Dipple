@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { awardBondXp } from "@/lib/companions";
 import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Weight } from "lucide-react";
+import { todayStr } from "@/lib/dates"
 import {
   LineChart,
   Line,
@@ -113,7 +115,7 @@ export default function ClientStatsPage() {
 
   const [loading, setLoading] = useState(true);
 
-  const today = new Date().toISOString().split("T")[0];
+const today = todayStr()
 
   const weightChartData = [...weightLogs]
     .sort((a, b) => a.log_date.localeCompare(b.log_date))
@@ -437,64 +439,80 @@ export default function ClientStatsPage() {
     await loadStats();
   };
 
-  const handleUploadPhotos = async () => {
-    if (!client || !frontFile || !backFile || !sideFile) {
-      alert("Please select all 3 photos (Front, Back, Side)");
-      return;
+const handleUploadPhotos = async () => {
+  if (!client || !frontFile || !backFile || !sideFile) {
+    alert("Please select all 3 photos (Front, Back, Side)");
+    return;
+  }
+
+  setUploadingPhotos(true);
+
+  // Capture whether this is the user's first-ever photo upload BEFORE
+  // we upload — once the upload succeeds, photos won't be empty anymore.
+  const isFirstEverUpload = photos.length === 0;
+
+  try {
+    const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
+      { type: "front", file: frontFile },
+      { type: "back", file: backFile },
+      { type: "side", file: sideFile },
+    ];
+
+    for (const { type, file } of uploads) {
+      const fileExt = file.name.split(".").pop();
+      const filePath = `${client.id}/${today}-${type}-${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("progress-photos")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from("progress-photos")
+        .getPublicUrl(filePath);
+
+      const imageUrl = publicUrlData.publicUrl;
+
+      const { error: dbError } = await supabase
+        .from("progress_photos")
+        .insert([
+          {
+            client_id: client.id,
+            image_url: imageUrl,
+            log_date: today,
+            photo_type: type,
+            note: photoNote || null,
+          },
+        ]);
+
+      if (dbError) throw dbError;
     }
 
-    setUploadingPhotos(true);
-
-    try {
-      const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
-        { type: "front", file: frontFile },
-        { type: "back", file: backFile },
-        { type: "side", file: sideFile },
-      ];
-
-      for (const { type, file } of uploads) {
-        const fileExt = file.name.split(".").pop();
-        const filePath = `${client.id}/${today}-${type}-${Date.now()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("progress-photos")
-          .upload(filePath, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: publicUrlData } = supabase.storage
-          .from("progress-photos")
-          .getPublicUrl(filePath);
-
-        const imageUrl = publicUrlData.publicUrl;
-
-        const { error: dbError } = await supabase
-          .from("progress_photos")
-          .insert([
-            {
-              client_id: client.id,
-              image_url: imageUrl,
-              log_date: today,
-              photo_type: type,
-              note: photoNote || null,
-            },
-          ]);
-
-        if (dbError) throw dbError;
-      }
-
-      setFrontFile(null);
-      setBackFile(null);
-      setSideFile(null);
-      setPhotoNote("");
-      alert("Photos uploaded successfully!");
-      await loadStats();
-    } catch (error: any) {
-      alert(`Error uploading photos: ${error.message}`);
-    } finally {
-      setUploadingPhotos(false);
+    // Award Bond XP for the first-ever photo upload — a "welcome to the journey"
+    // moment. Self-disabling if companions aren't enabled. Subsequent uploads
+    // (including weekly tracking and milestone-driven uploads) don't repeat this.
+    if (isFirstEverUpload) {
+      await awardBondXp(
+        client.id,
+        150,
+        "first_progress_photos",
+        "Uploaded your first set of progress photos"
+      );
     }
-  };
+
+    setFrontFile(null);
+    setBackFile(null);
+    setSideFile(null);
+    setPhotoNote("");
+    alert("Photos uploaded successfully!");
+    await loadStats();
+  } catch (error: any) {
+    alert(`Error uploading photos: ${error.message}`);
+  } finally {
+    setUploadingPhotos(false);
+  }
+};
 
   const handleDeleteWeek = async (log_date: string) => {
     if (!client) return;
