@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { notifyProgramAssigned } from "@/components/notifications";
 import TrainerClientMessages from "@/components/TrainerClientMessages";
 import TrainerClientInsights from "@/components/TrainerClientInsights";
@@ -128,6 +129,8 @@ type MeasurementLog = {
 type ProgressPhoto = {
   id: string;
   image_url: string;
+  storage_path: string | null;
+  signed_url?: string | null;
   log_date: string;
   note: string | null;
 };
@@ -422,7 +425,9 @@ if (clientData) {
         .order("log_date", { ascending: false})
         .limit(24);
 
-      setProgressPhotos(photoData ?? []);
+      setProgressPhotos(
+        photoData ? await withSignedProgressPhotoUrls(photoData) : []
+      );
 
       const { data: templateData } = await supabase
         .from("program_templates")
@@ -1516,7 +1521,7 @@ const handleSaveCalorieTarget = async () => {
                     progressPhotos.map((photo) => (
                       <div key={photo.id} className={`${styles.card} p-3`}>
                         <img
-                          src={photo.image_url}
+                          src={photo.signed_url ?? photo.image_url}
                           alt="Progress"
                           className="h-56 w-full rounded-xl object-cover"
                         />

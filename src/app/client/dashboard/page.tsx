@@ -617,14 +617,11 @@ setTogglingWater(false);
 
           if (uploadError) throw uploadError;
 
-          const { data: publicUrlData } = supabase.storage
-            .from("progress-photos")
-            .getPublicUrl(filePath);
-
           const { error: dbError } = await supabase.from("progress_photos").insert([
             {
               client_id: client.id,
-              image_url: publicUrlData.publicUrl,
+              image_url: filePath,
+              storage_path: filePath,
               log_date: photoLogDate,
               photo_type: type,
               note: `Week ${milestoneConfig.week_number} milestone`,

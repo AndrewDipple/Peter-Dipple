@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { getProgressPhotoPath, withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { styles } from "@/lib/design";
 import { awardBondXp } from "@/lib/companions";
 import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Sparkles, Weight } from "lucide-react";
@@ -40,6 +41,8 @@ type WeightLog = {
 type ProgressPhoto = {
   id: string;
   image_url: string;
+  storage_path: string | null;
+  signed_url?: string | null;
   log_date: string;
   note: string | null;
   photo_type: "front" | "back" | "side";
@@ -386,7 +389,7 @@ if (isEnabled) {
       .order("log_date", { ascending: true });
 
     if (photoData) {
-      setPhotos(photoData);
+      setPhotos(await withSignedProgressPhotoUrls(photoData));
     } else {
       setPhotos([]);
     }
@@ -493,18 +496,13 @@ const handleUploadPhotos = async () => {
 
       if (uploadError) throw uploadError;
 
-      const { data: publicUrlData } = supabase.storage
-        .from("progress-photos")
-        .getPublicUrl(filePath);
-
-      const imageUrl = publicUrlData.publicUrl;
-
       const { error: dbError } = await supabase
         .from("progress_photos")
         .insert([
           {
             client_id: client.id,
-            image_url: imageUrl,
+            image_url: filePath,
+            storage_path: filePath,
             log_date: today,
             photo_type: type,
             note: photoNote || null,
@@ -532,8 +530,9 @@ const handleUploadPhotos = async () => {
     setPhotoNote("");
     alert("Photos uploaded successfully!");
     await loadStats();
-  } catch (error: any) {
-    alert(`Error uploading photos: ${error.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    alert(`Error uploading photos: ${message}`);
   } finally {
     setUploadingPhotos(false);
   }
@@ -555,7 +554,7 @@ const handleUploadPhotos = async () => {
     try {
       // Delete from storage
       for (const photo of photosToDelete) {
-        const path = photo.image_url.split("/progress-photos/")[1];
+        const path = getProgressPhotoPath(photo);
         if (path) {
           await supabase.storage.from("progress-photos").remove([path]);
         }
@@ -571,8 +570,9 @@ const handleUploadPhotos = async () => {
       if (error) throw error;
 
       await loadStats();
-    } catch (error: any) {
-      alert(`Error deleting photos: ${error.message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      alert(`Error deleting photos: ${message}`);
     } finally {
       setDeletingWeek(null);
     }
@@ -1032,7 +1032,7 @@ const handleUploadPhotos = async () => {
                 </p>
                 {week.front ? (
                   <img
-                    src={week.front.image_url}
+                    src={week.front.signed_url ?? week.front.image_url}
                     alt="Front"
                     className="h-48 w-full rounded-lg object-cover"
                   />
@@ -1074,7 +1074,7 @@ const handleUploadPhotos = async () => {
                 </p>
                 {week.back ? (
                   <img
-                    src={week.back.image_url}
+                    src={week.back.signed_url ?? week.back.image_url}
                     alt="Back"
                     className="h-48 w-full rounded-lg object-cover"
                   />
@@ -1107,7 +1107,7 @@ const handleUploadPhotos = async () => {
                 </p>
                 {week.side ? (
                   <img
-                    src={week.side.image_url}
+                    src={week.side.signed_url ?? week.side.image_url}
                     alt="Side"
                     className="h-48 w-full rounded-lg object-cover"
                   />
