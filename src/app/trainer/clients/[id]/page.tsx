@@ -8,6 +8,7 @@ import TrainerClientMessages from "@/components/TrainerClientMessages";
 import TrainerClientInsights from "@/components/TrainerClientInsights";
 import { styles } from "@/lib/design";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
 import {
   LineChart,
@@ -38,6 +39,16 @@ type Client = {
   daily_step_target: number;
     calorie_adjustment: number | null;          // NEW
   trainer_activity_level: string | null;      // NEW
+  archived_at?: string | null;
+  deletion_requested_at?: string | null;
+  delete_after?: string | null;
+  terms_accepted_at?: string | null;
+  privacy_accepted_at?: string | null;
+  health_data_consent_at?: string | null;
+  marketing_consent_at?: string | null;
+  terms_version?: string | null;
+  privacy_version?: string | null;
+  marketing_consent_version?: string | null;
 };
 
 type MealLog = {
@@ -141,6 +152,14 @@ type DailyTracking = {
   steps_logged: number | null;
 };
 
+type AdminAuditEvent = {
+  id: string;
+  event_type: string;
+  actor_profile_id: string | null;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+};
+
 type MacroTotals = {
   protein: number;
   carbs: number;
@@ -217,6 +236,7 @@ const ACTIVITY_OPTIONS = [
 ];
 
 export default function ClientDetailPage({ params }: PageProps) {
+  const router = useRouter();
   const [clientId, setClientId] = useState("");
   const [client, setClient] = useState<Client | null>(null);
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
@@ -258,6 +278,17 @@ const [trainerActivity, setTrainerActivity] = useState<string>("");
 const [calorieAdjustment, setCalorieAdjustment] = useState<string>("0");
 const [savingTarget, setSavingTarget] = useState(false);
 const [savedFlash, setSavedFlash] = useState(false);
+const [currentRole, setCurrentRole] = useState<string | null>(null);
+const [deleteConfirmation, setDeleteConfirmation] = useState("");
+const [deletingClient, setDeletingClient] = useState(false);
+const [deleteError, setDeleteError] = useState<string | null>(null);
+const [exportingClient, setExportingClient] = useState(false);
+const [exportError, setExportError] = useState<string | null>(null);
+const [sarExportNote, setSarExportNote] = useState("");
+const [retentionUpdating, setRetentionUpdating] = useState<string | null>(null);
+const [retentionError, setRetentionError] = useState<string | null>(null);
+const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
+const [auditLoading, setAuditLoading] = useState(false);
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -371,6 +402,38 @@ const proposedTdee = useMemo(() => {
       const resolvedParams = await params;
       const id = resolvedParams.id;
       setClientId(id);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        setCurrentRole(profileData?.role ?? null);
+
+        if (profileData?.role === "admin") {
+          setAuditLoading(true);
+          const { data: auditData, error: auditError } = await supabase
+            .from("admin_audit_events")
+            .select("id, event_type, actor_profile_id, created_at, metadata")
+            .eq("target_client_id", id)
+            .order("created_at", { ascending: false })
+            .limit(10);
+
+          if (auditError) {
+            console.warn("Could not load admin audit events", auditError);
+          } else {
+            setAuditEvents((auditData ?? []) as AdminAuditEvent[]);
+          }
+
+          setAuditLoading(false);
+        }
+      }
 
       const { data: clientData } = await supabase
         .from("clients")
@@ -830,6 +893,202 @@ const handleSaveCalorieTarget = async () => {
   setSavedFlash(true);
   setTimeout(() => setSavedFlash(false), 2000);
 };
+
+const handleDeleteClient = async () => {
+  if (!client || deletingClient) return;
+
+  const requiredConfirmation = `DELETE ${client.full_name}`;
+
+  if (deleteConfirmation.trim() !== requiredConfirmation) {
+    setDeleteError(`Type "${requiredConfirmation}" to confirm.`);
+    return;
+  }
+
+  setDeletingClient(true);
+  setDeleteError(null);
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    setDeleteError("You need to sign in again before deleting this client.");
+    setDeletingClient(false);
+    return;
+  }
+
+  const response = await fetch("/api/admin/delete-client", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ clientId: client.id, note: sarExportNote }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    setDeleteError(result.error ?? "Could not delete client.");
+    setDeletingClient(false);
+    return;
+  }
+
+  router.push("/trainer/clients");
+};
+
+const handleExportClient = async () => {
+  if (!client || exportingClient) return;
+
+  setExportingClient(true);
+  setExportError(null);
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    setExportError("You need to sign in again before exporting this client.");
+    setExportingClient(false);
+    return;
+  }
+
+  const response = await fetch("/api/admin/export-client", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ clientId: client.id }),
+  });
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    setExportError(result.error ?? "Could not export client.");
+    setExportingClient(false);
+    return;
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const disposition = response.headers.get("Content-Disposition");
+  const fileName =
+    disposition?.match(/filename="([^"]+)"/)?.[1] ?? `sar-${client.id}.json`;
+
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setAuditEvents((events) =>
+    [
+      {
+        id: `local-sar-${Date.now()}`,
+        event_type: "sar_exported",
+        actor_profile_id: null,
+        created_at: new Date().toISOString(),
+        metadata: { fileName, note: sarExportNote.trim() || null },
+      },
+      ...events,
+    ].slice(0, 10)
+  );
+  setSarExportNote("");
+  setExportingClient(false);
+};
+
+const handleRetentionAction = async (
+  action: "start_retention" | "record_deletion_request" | "clear_retention"
+) => {
+  if (!client || retentionUpdating) return;
+
+  setRetentionUpdating(action);
+  setRetentionError(null);
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    setRetentionError("You need to sign in again before updating retention.");
+    setRetentionUpdating(null);
+    return;
+  }
+
+  const response = await fetch("/api/admin/client-retention", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ clientId: client.id, action }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || !result.client) {
+    setRetentionError(result.error ?? "Could not update retention.");
+    setRetentionUpdating(null);
+    return;
+  }
+
+  setClient({
+    ...client,
+    archived_at: result.client.archived_at,
+    deletion_requested_at: result.client.deletion_requested_at,
+    delete_after: result.client.delete_after,
+  });
+  setAuditEvents((events) =>
+    [
+      {
+        id: `local-retention-${Date.now()}`,
+        event_type:
+          action === "start_retention"
+            ? "retention_started"
+            : action === "record_deletion_request"
+              ? "deletion_requested"
+              : "retention_cleared",
+        actor_profile_id: null,
+        created_at: new Date().toISOString(),
+        metadata: {},
+      },
+      ...events,
+    ].slice(0, 10)
+  );
+  setRetentionUpdating(null);
+};
+
+const formatRetentionDate = (date: string | null | undefined) => {
+  if (!date) return "-";
+  return new Date(date).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const formatAuditDate = (date: string) =>
+  new Date(date).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const formatAuditEvent = (eventType: string) => {
+  const labels: Record<string, string> = {
+    sar_exported: "SAR exported",
+    retention_started: "Retention started",
+    deletion_requested: "Deletion requested",
+    retention_cleared: "Retention cleared",
+    client_deleted: "Client deleted",
+  };
+
+  return labels[eventType] ?? eventType.replaceAll("_", " ");
+};
+
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
   return (
@@ -857,6 +1116,195 @@ const handleSaveCalorieTarget = async () => {
               </h3>
               <p className="mt-1 text-ink-muted">{client.email}</p>
             </div>
+
+            {currentRole === "admin" && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-5">
+                <h3 className="font-semibold text-red-800">
+                  GDPR deletion
+                </h3>
+                <p className="mt-1 text-sm text-red-700">
+                  Permanently deletes this client&apos;s app data, progress photos, profile,
+                  and login account. This cannot be undone.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleExportClient}
+                  disabled={exportingClient}
+                  className={`${styles.buttonSecondary} mt-4`}
+                >
+                  {exportingClient ? "Exporting..." : "Download SAR export"}
+                </button>
+                <label className="mt-4 block text-sm font-medium text-red-800">
+                  SAR export note
+                </label>
+                <textarea
+                  value={sarExportNote}
+                  onChange={(event) => setSarExportNote(event.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  className={styles.textarea}
+                  placeholder="Reason for export, e.g. client requested copy by email"
+                  disabled={exportingClient}
+                />
+                {exportError && (
+                  <p className="mt-3 text-sm font-medium text-red-700">
+                    {exportError}
+                  </p>
+                )}
+                <div className="mt-4 rounded-md border border-red-200 bg-white/70 p-4">
+                  <h4 className="font-semibold text-red-800">
+                    Retention status
+                  </h4>
+                  <div className="mt-3 grid gap-3 text-sm text-red-800 md:grid-cols-3">
+                    <div>
+                      <p className="font-medium">Archived</p>
+                      <p>{formatRetentionDate(client.archived_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Deletion requested</p>
+                      <p>{formatRetentionDate(client.deletion_requested_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Delete/review after</p>
+                      <p>{formatRetentionDate(client.delete_after)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2 md:flex-row md:flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleRetentionAction("start_retention")}
+                      disabled={Boolean(retentionUpdating)}
+                      className={styles.buttonSecondary}
+                    >
+                      {retentionUpdating === "start_retention"
+                        ? "Saving..."
+                        : "Start 12-month retention"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleRetentionAction("record_deletion_request")
+                      }
+                      disabled={Boolean(retentionUpdating)}
+                      className={styles.buttonSecondary}
+                    >
+                      {retentionUpdating === "record_deletion_request"
+                        ? "Saving..."
+                        : "Record deletion request"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRetentionAction("clear_retention")}
+                      disabled={Boolean(retentionUpdating)}
+                      className={styles.buttonSecondary}
+                    >
+                      {retentionUpdating === "clear_retention"
+                        ? "Clearing..."
+                        : "Clear retention markers"}
+                    </button>
+                  </div>
+                  {retentionError && (
+                    <p className="mt-3 text-sm font-medium text-red-700">
+                      {retentionError}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-4 rounded-md border border-red-200 bg-white/70 p-4">
+                  <h4 className="font-semibold text-red-800">
+                    Consent status
+                  </h4>
+                  <div className="mt-3 grid gap-3 text-sm text-red-800 md:grid-cols-2">
+                    <div>
+                      <p className="font-medium">Terms accepted</p>
+                      <p>{formatRetentionDate(client.terms_accepted_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Privacy accepted</p>
+                      <p>{formatRetentionDate(client.privacy_accepted_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Health data consent</p>
+                      <p>{formatRetentionDate(client.health_data_consent_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium">Marketing consent</p>
+                      <p>{formatRetentionDate(client.marketing_consent_at)}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-md border border-red-200 bg-white/70 p-4">
+                  <h4 className="font-semibold text-red-800">
+                    Recent admin actions
+                  </h4>
+                  {auditLoading ? (
+                    <p className="mt-3 text-sm text-red-700">
+                      Loading audit trail...
+                    </p>
+                  ) : auditEvents.length === 0 ? (
+                    <p className="mt-3 text-sm text-red-700">
+                      No admin actions recorded for this client yet.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {auditEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className="rounded-md border border-red-100 bg-white p-3 text-sm"
+                        >
+                          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                            <p className="font-semibold text-red-800">
+                              {formatAuditEvent(event.event_type)}
+                            </p>
+                            <p className="text-red-700">
+                              {formatAuditDate(event.created_at)}
+                            </p>
+                          </div>
+                          <p className="mt-1 text-xs text-red-700">
+                            Actor: {event.actor_profile_id ?? "current admin"}
+                          </p>
+                          {typeof event.metadata?.note === "string" &&
+                            event.metadata.note && (
+                              <p className="mt-1 text-xs text-red-700">
+                                Note: {event.metadata.note}
+                              </p>
+                            )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <label className="mt-4 block text-sm font-medium text-red-800">
+                  Type DELETE {client.full_name} to confirm
+                </label>
+                <div className="mt-2 flex flex-col gap-3 md:flex-row">
+                  <input
+                    value={deleteConfirmation}
+                    onChange={(event) => {
+                      setDeleteConfirmation(event.target.value);
+                      setDeleteError(null);
+                    }}
+                    className={styles.input}
+                    disabled={deletingClient}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDeleteClient}
+                    disabled={
+                      deletingClient ||
+                      deleteConfirmation.trim() !== `DELETE ${client.full_name}`
+                    }
+                    className={styles.buttonDanger}
+                  >
+                    {deletingClient ? "Deleting..." : "Delete client"}
+                  </button>
+                </div>
+                {deleteError && (
+                  <p className="mt-3 text-sm font-medium text-red-700">
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className={`${styles.card} mt-4`}>
               <h3 className="font-semibold text-ink">Onboarding Summary</h3>

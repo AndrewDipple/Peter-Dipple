@@ -12,6 +12,7 @@ import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
 import WeeklyCheckInCard from "@/components/WeeklyCheckInCard";
+import { hasAcceptedCurrentLegal } from "@/lib/legal";
 import {
   getActiveCompanionView,
   isCompanionEnabledForClient,
@@ -31,6 +32,11 @@ type Client = {
   onboarding_complete: boolean | null;
   tour_completed_at: string | null;  // NEW
   daily_step_target: number;
+  terms_accepted_at?: string | null;
+  privacy_accepted_at?: string | null;
+  health_data_consent_at?: string | null;
+  terms_version?: string | null;
+  privacy_version?: string | null;
 };
 
 type ClientProgram = {
@@ -259,6 +265,11 @@ const [showTour, setShowTour] = useState(false);
     if (clientError || !clientData) {
       setClient(null);
       setLoading(false);
+      return;
+    }
+
+    if (!hasAcceptedCurrentLegal(clientData)) {
+      router.replace("/client/terms");
       return;
     }
 
@@ -853,7 +864,7 @@ You're currently in Week {clientProgram?.current_week}                </p>
                       {togglingWater
                         ? "..."
                         : dailyTracking?.water_completed
-                        ? "âœ“ Complete"
+                        ? "Complete"
                         : "Mark Complete"}
                     </button>
                   </div>

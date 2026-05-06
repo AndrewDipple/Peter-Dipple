@@ -20,6 +20,7 @@ type MessageTrainerBoxProps = {
   contextType: MessageContext;
   contextId?: string | null;
   contextLabel: string;
+  anchorId?: string;
   title?: string;
   placeholder?: string;
   accent?: "default" | "workout" | "nutrition";
@@ -36,6 +37,7 @@ export default function MessageTrainerBox({
   contextType,
   contextId = null,
   contextLabel,
+  anchorId = "message-trainer",
   title = "Message your trainer",
   placeholder = "Ask a question or leave a quick note...",
   accent = "default",
@@ -89,7 +91,7 @@ export default function MessageTrainerBox({
       .single();
 
     if (error || !data) {
-      alert("Message could not be sent. Please try again.");
+      alert(error?.message || "Message could not be sent. Please try again.");
       setSending(false);
       return;
     }
@@ -100,7 +102,7 @@ export default function MessageTrainerBox({
   };
 
   return (
-    <div className={styles.card}>
+    <div id={anchorId} className={`${styles.card} scroll-mt-24`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className={styles.h2}>{title}</h2>

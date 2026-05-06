@@ -5,10 +5,16 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
+import { hasAcceptedCurrentLegal } from "@/lib/legal";
 
 type Client = {
   id: string;
   profile_id: string | null;
+  terms_accepted_at?: string | null;
+  privacy_accepted_at?: string | null;
+  health_data_consent_at?: string | null;
+  terms_version?: string | null;
+  privacy_version?: string | null;
 };
 
 type ProgramTemplate = {
@@ -180,12 +186,17 @@ export default function ClientOnboardingPage() {
 
       const { data: clientData } = await supabase
         .from("clients")
-        .select("id, profile_id")
+        .select("id, profile_id, terms_accepted_at, privacy_accepted_at, health_data_consent_at, terms_version, privacy_version")
         .eq("profile_id", user.id)
         .single();
 
       if (!clientData) {
         setLoading(false);
+        return;
+      }
+
+      if (!hasAcceptedCurrentLegal(clientData)) {
+        router.replace("/client/terms");
         return;
       }
 

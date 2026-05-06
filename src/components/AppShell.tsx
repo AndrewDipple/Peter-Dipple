@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Settings,
   Bell,
+  Shield,
 } from "lucide-react";
 import Logo from "./Logo";
 import CompanionEvolutionCelebration, {
@@ -219,6 +220,16 @@ export default function AppShell({ userType, children }: Props) {
     router.push("/notifications");
   };
 
+  const handleOpenPrivacy = () => {
+    setMenuOpen(false);
+    router.push("/privacy");
+  };
+
+  const handleOpenTerms = () => {
+    setMenuOpen(false);
+    router.push("/terms");
+  };
+
   const handleSubmitFeedback = async () => {
     if (!feedbackTitle.trim() || !feedbackDescription.trim()) {
       alert("Please fill in all fields");
@@ -354,6 +365,24 @@ export default function AppShell({ userType, children }: Props) {
                 >
                   <MessageSquare size={16} />
                   Report Bug / Request
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenPrivacy}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <Shield size={16} />
+                  Privacy
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenTerms}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <Shield size={16} />
+                  Terms
                 </button>
 
                 <button

@@ -14,6 +14,11 @@ type ProgressPhotoRow = {
   clients: { profile_id: string | null } | { profile_id: string | null }[] | null;
 };
 
+type ClientOwnerRow = {
+  id: string;
+  profile_id: string | null;
+};
+
 function normalizePath(path: unknown) {
   if (typeof path !== "string") return null;
   const trimmed = path.trim();
@@ -27,6 +32,10 @@ function normalizePath(path: unknown) {
   }
 
   return trimmed.startsWith("http") ? null : trimmed;
+}
+
+function getClientIdFromPath(path: string) {
+  return path.split("/")[0] || null;
 }
 
 export async function POST(request: NextRequest) {
@@ -97,28 +106,66 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     const isStaff = isStaffRole(profile?.role);
+    const allowedPaths = new Set<string>();
 
-    const [storagePathRows, imageUrlRows] = await Promise.all([
-      supabaseAdmin
-        .from("progress_photos")
-        .select("client_id, image_url, storage_path, clients(profile_id)")
-        .in("storage_path", paths),
-      supabaseAdmin
-        .from("progress_photos")
-        .select("client_id, image_url, storage_path, clients(profile_id)")
-        .in("image_url", paths),
-    ]);
+    if (isStaff) {
+      for (const path of paths) {
+        allowedPaths.add(path);
+      }
+    } else {
+      const clientIds = Array.from(
+        new Set(
+          paths
+            .map(getClientIdFromPath)
+            .filter((clientId): clientId is string => Boolean(clientId))
+        )
+      );
 
-    if (storagePathRows.error || imageUrlRows.error) {
-      return NextResponse.json({ error: "Could not load photos" }, { status: 500 });
+      if (clientIds.length > 0) {
+        const { data: ownedClients } = await supabaseAdmin
+          .from("clients")
+          .select("id, profile_id")
+          .in("id", clientIds)
+          .eq("profile_id", user.id);
+
+        const ownedClientIds = new Set(
+          ((ownedClients ?? []) as ClientOwnerRow[]).map((client) => client.id)
+        );
+
+        for (const path of paths) {
+          const clientId = getClientIdFromPath(path);
+
+          if (clientId && ownedClientIds.has(clientId)) {
+            allowedPaths.add(path);
+          }
+        }
+      }
     }
 
-    const photoRows = [
-      ...(storagePathRows.data ?? []),
-      ...(imageUrlRows.data ?? []),
-    ];
+    const unmatchedPaths = paths.filter((path) => !allowedPaths.has(path));
+    let photoRows: unknown[] = [];
 
-    const allowedPaths = new Set<string>();
+    if (unmatchedPaths.length > 0) {
+      const [storagePathRows, imageUrlRows] = await Promise.all([
+        supabaseAdmin
+          .from("progress_photos")
+          .select("client_id, image_url, storage_path, clients(profile_id)")
+          .in("storage_path", unmatchedPaths),
+        supabaseAdmin
+          .from("progress_photos")
+          .select("client_id, image_url, storage_path, clients(profile_id)")
+          .in("image_url", unmatchedPaths),
+      ]);
+
+      if (storagePathRows.error || imageUrlRows.error) {
+        return NextResponse.json({ error: "Could not load photos" }, { status: 500 });
+      }
+
+      photoRows = [
+        ...(storagePathRows.data ?? []),
+        ...(imageUrlRows.data ?? []),
+      ];
+    }
 
     for (const row of (photoRows ?? []) as ProgressPhotoRow[]) {
       const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
@@ -126,7 +173,7 @@ export async function POST(request: NextRequest) {
 
       if (!rowPath) continue;
 
-      if (isStaff || client?.profile_id === user.id) {
+      if (client?.profile_id === user.id) {
         allowedPaths.add(rowPath);
       }
     }

@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { styles } from "@/lib/design";
 import Image from "next/image";
+import Link from "next/link";
+import { isStaff } from "@/lib/roles";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -41,7 +43,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (profile.role === "trainer") {
+    if (isStaff(profile.role)) {
       router.push("/trainer/dashboard");
     } else {
       router.push("/client/dashboard");
@@ -130,6 +132,15 @@ return (
           >
             {resetLoading ? "Sending reset email..." : "Forgot password?"}
           </button>
+        </div>
+        <div className="mt-4 text-center">
+          <Link href="/privacy" className="text-sm font-medium text-ink-muted underline">
+            Privacy & data rights
+          </Link>
+          <span className="mx-2 text-ink-muted">|</span>
+          <Link href="/terms" className="text-sm font-medium text-ink-muted underline">
+            Terms
+          </Link>
         </div>
       </div>
     </main>

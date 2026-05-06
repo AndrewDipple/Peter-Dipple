@@ -1,7 +1,7 @@
 ﻿"use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MessageCircle, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -21,15 +21,16 @@ type ClientUnreadRepliesBannerProps = {
 };
 
 const contextHref: Record<ClientReplyContext, string> = {
-  general: "/client/dashboard",
-  workout_day: "/client/workout",
-  nutrition: "/client/nutrition",
+  general: "/client/dashboard#message-trainer",
+  workout_day: "/client/workout#message-trainer",
+  nutrition: "/client/nutrition#message-trainer",
 };
 
 export default function ClientUnreadRepliesBanner({
   clientId,
   compact = false,
 }: ClientUnreadRepliesBannerProps) {
+  const router = useRouter();
   const [replies, setReplies] = useState<TrainerReply[]>([]);
   const [loading, setLoading] = useState(true);
   const [dismissing, setDismissing] = useState(false);
@@ -67,7 +68,7 @@ export default function ClientUnreadRepliesBanner({
   }, [clientId]);
 
   const markRead = async () => {
-    if (replies.length === 0) return;
+    if (replies.length === 0) return false;
 
     setDismissing(true);
     const ids = replies.map((reply) => reply.id);
@@ -78,6 +79,16 @@ export default function ClientUnreadRepliesBanner({
 
     if (!error) setReplies([]);
     setDismissing(false);
+    return !error;
+  };
+
+  const handleReadReply = async () => {
+    const href = latestReply
+      ? contextHref[latestReply.context_type] ?? "/client/dashboard"
+      : "/client/dashboard";
+
+    await markRead();
+    router.push(href);
   };
 
   if (loading || replies.length === 0 || !latestReply) return null;
@@ -103,13 +114,14 @@ export default function ClientUnreadRepliesBanner({
           )}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <Link
-              href={contextHref[latestReply.context_type] ?? "/client/dashboard"}
-              onClick={markRead}
+            <button
+              type="button"
+              onClick={handleReadReply}
+              disabled={dismissing}
               className="rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-ink hover:bg-gold/90"
             >
               Read reply
-            </Link>
+            </button>
             <button
               type="button"
               onClick={markRead}

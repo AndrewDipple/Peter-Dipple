@@ -7,6 +7,7 @@ import { styles } from "@/lib/design";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Moon, Sun, User, Mail, Upload, ArrowLeft, Power } from "lucide-react";
 import { Role, isStaff } from "@/lib/roles";
+import { MARKETING_CONSENT_VERSION } from "@/lib/legal";
 
 import {
   getActiveCompanionView,
@@ -28,6 +29,8 @@ import {
 type ProfileRecord = {
   id: string;            // row id in whichever table we're editing
   full_name: string | null;
+  marketing_consent_at?: string | null;
+  marketing_consent_version?: string | null;
 
 };
 
@@ -43,6 +46,9 @@ export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [marketingConsentAt, setMarketingConsentAt] = useState<string | null>(null);
+  const [marketingConsentVersion, setMarketingConsentVersion] = useState<string | null>(null);
+  const [savingMarketingConsent, setSavingMarketingConsent] = useState(false);
 
     const [availablePaths, setAvailablePaths] = useState<CompanionPath[]>([]);
 
@@ -92,7 +98,7 @@ export default function SettingsPage() {
 
         const { data: clientData, error: clientErr } = await supabase
           .from("clients")
-          .select("id, full_name")
+          .select("id, full_name, marketing_consent_at, marketing_consent_version")
           .eq("profile_id", user.id)
           .maybeSingle();
 
@@ -105,8 +111,12 @@ export default function SettingsPage() {
         setRecord({
           id: clientData.id,
           full_name: clientData.full_name,
+          marketing_consent_at: clientData.marketing_consent_at,
+          marketing_consent_version: clientData.marketing_consent_version,
         });
         setFullName(clientData.full_name ?? "");
+        setMarketingConsentAt(clientData.marketing_consent_at ?? null);
+        setMarketingConsentVersion(clientData.marketing_consent_version ?? null);
       }
 
       setLoading(false);
@@ -197,6 +207,37 @@ export default function SettingsPage() {
     await loadPage();
   };
 
+  const handleMarketingConsentChange = async (enabled: boolean) => {
+    if (!record || role !== "client") return;
+
+    setSavingMarketingConsent(true);
+
+    const consentAt = enabled ? new Date().toISOString() : null;
+    const consentVersion = enabled ? MARKETING_CONSENT_VERSION : null;
+
+    const { error } = await supabase
+      .from("clients")
+      .update({
+        marketing_consent_at: consentAt,
+        marketing_consent_version: consentVersion,
+      })
+      .eq("id", record.id);
+
+    if (error) {
+      flashMessage("error", "Could not update marketing consent");
+      setSavingMarketingConsent(false);
+      return;
+    }
+
+    setMarketingConsentAt(consentAt);
+    setMarketingConsentVersion(consentVersion);
+    flashMessage(
+      "success",
+      enabled ? "Marketing consent enabled" : "Marketing consent withdrawn"
+    );
+    setSavingMarketingConsent(false);
+  };
+
 
   if (loading) {
     return <div className="p-6"><p>Loading...</p></div>;
@@ -209,7 +250,7 @@ export default function SettingsPage() {
       <div className="p-6">
         <div className={styles.card}>
           <h2 className={styles.h2}>Profile Not Found</h2>
-          <p className="mt-4">We couldn't load your account.</p>
+          <p className="mt-4">We couldn&apos;t load your account.</p>
           <button
             onClick={() => router.push(homePath)}
             className={`${styles.buttonPrimary} mt-4`}
@@ -292,6 +333,44 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+
+        {role === "client" && (
+          <div className={styles.card}>
+            <h2 className={styles.h2}>Marketing consent</h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              This optional consent allows Peter Training to use progress
+              information, testimonials, and/or progress photos for marketing,
+              education, or promotional purposes. Reasonable efforts will be made
+              to maintain anonymity unless you separately agree to be identified.
+            </p>
+            <label className="mt-4 flex items-start gap-3 rounded-md border border-border-subtle bg-surface-sunken p-4 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={Boolean(marketingConsentAt)}
+                onChange={(event) =>
+                  handleMarketingConsentChange(event.target.checked)
+                }
+                disabled={savingMarketingConsent}
+                className="mt-1 h-4 w-4 shrink-0"
+              />
+              <span>
+                I consent to optional marketing use. I understand I can withdraw
+                this consent at any time.
+              </span>
+            </label>
+            <p className="mt-3 text-xs text-ink-muted">
+              Status:{" "}
+              {marketingConsentAt
+                ? `consented on ${new Date(marketingConsentAt).toLocaleDateString(
+                    "en-GB"
+                  )}`
+                : "not consented"}
+              {marketingConsentVersion
+                ? ` (version ${marketingConsentVersion})`
+                : ""}
+            </p>
+          </div>
+        )}
 
           <div className={styles.card}>
             <h3 className="font-semibold text-ink">Companion settings</h3>
