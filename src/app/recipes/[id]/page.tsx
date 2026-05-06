@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { isStaff } from "@/lib/roles";
+import { todayStr } from "@/lib/dates";
+import { awardBondXp } from "@/lib/companions";
 
 type Recipe = {
   id: string;
@@ -56,6 +58,11 @@ export default function RecipeDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [canEdit, setCanEdit] = useState(false);
 
+  const [clientId, setClientId] = useState<string | null>(null);
+const [addingToPlan, setAddingToPlan] = useState(false);
+const [markingEaten, setMarkingEaten] = useState(false);
+const [toast, setToast] = useState<{ text: string; type: "success" | "error" } | null>(null);
+
   useEffect(() => {
     const loadRecipe = async () => {
       const resolvedParams = await params;
@@ -84,16 +91,29 @@ export default function RecipeDetailPage({ params }: PageProps) {
         setIngredients([]);
       }
 
-      const user = userRes.data.user;
-      if (user) {
-        const { data: profileRow } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
+const user = userRes.data.user;
+if (user) {
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
 
-        setCanEdit(isStaff(profileRow?.role));
-      }
+  const role = profileRow?.role;
+  setCanEdit(isStaff(role));
+
+  // Look up client row for clients only — trainers don't have one.
+  if (role === "client") {
+    const { data: clientRow } = await supabase
+      .from("clients")
+      .select("id")
+      .eq("profile_id", user.id)
+      .maybeSingle();
+
+    if (clientRow) setClientId(clientRow.id);
+  }
+}
+
 
       setLoading(false);
     };
@@ -103,8 +123,75 @@ export default function RecipeDetailPage({ params }: PageProps) {
 
   const recipeTags = recipe ? getRecipeTags(recipe) : [];
 
+const flashToast = (text: string, type: "success" | "error" = "success") => {
+  setToast({ text, type });
+  setTimeout(() => setToast(null), 3000);
+};
+
+const handleAddToMealPlan = async () => {
+  if (!clientId || !recipeId) return;
+  setAddingToPlan(true);
+
+  const { error } = await supabase.from("meal_plans").insert([
+    {
+      client_id: clientId,
+      recipe_id: recipeId,
+      planned_date: todayStr(),
+      quantity: 1,
+    },
+  ]);
+
+  setAddingToPlan(false);
+
+  if (error) {
+    flashToast("Could not add to meal plan", "error");
+    return;
+  }
+
+  flashToast("Added to today's meal plan");
+};
+
+const handleMarkAsEaten = async () => {
+  if (!clientId || !recipeId) return;
+  setMarkingEaten(true);
+
+  const { error } = await supabase.from("meal_logs").insert([
+    {
+      client_id: clientId,
+      recipe_id: recipeId,
+      log_date: todayStr(),
+      completed: true,
+      quantity: 1,
+    },
+  ]);
+
+  if (error) {
+    setMarkingEaten(false);
+    flashToast("Could not mark as eaten", "error");
+    return;
+  }
+
+  // Same XP grant as the nutrition page's off-plan log.
+  await awardBondXp(clientId, 10, "logged_off_plan_meal", "Logged a recipe as eaten");
+
+  setMarkingEaten(false);
+  flashToast("Marked as eaten");
+};
+
   return (
     <>
+      {toast && (
+  <div
+    className={`fixed top-4 left-1/2 z-[100] -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+      toast.type === "success"
+        ? "bg-emerald text-white"
+        : "bg-red-600 text-white"
+    }`}
+  >
+    {toast.text}
+  </div>
+)}
+      
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/recipes" className={styles.buttonSecondary}>
@@ -257,6 +344,28 @@ export default function RecipeDetailPage({ params }: PageProps) {
               {recipe.instructions || "No instructions"}
             </pre>
           </div>
+          {/* Client-only action buttons */}
+{clientId && (
+  <div className="flex flex-col gap-3 sm:flex-row">
+    <button
+      type="button"
+      onClick={handleAddToMealPlan}
+      disabled={addingToPlan || markingEaten}
+      className={`${styles.buttonSecondary} flex-1 disabled:opacity-50`}
+    >
+      {addingToPlan ? "Adding..." : "Add to today's meal plan"}
+    </button>
+
+    <button
+      type="button"
+      onClick={handleMarkAsEaten}
+      disabled={addingToPlan || markingEaten}
+      className={`${styles.buttonPrimary} flex-1 disabled:opacity-50`}
+    >
+      {markingEaten ? "Saving..." : "Mark as eaten"}
+    </button>
+  </div>
+)}
         </div>
       )}
     </>

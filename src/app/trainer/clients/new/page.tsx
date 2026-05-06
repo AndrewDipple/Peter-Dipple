@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { styles } from "@/lib/design";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 export default function NewClientPage() {
   const [fullName, setFullName] = useState("");
@@ -19,15 +20,25 @@ export default function NewClientPage() {
 
     setSaving(true);
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      alert("Please sign in again before inviting a client.");
+      setSaving(false);
+      return;
+    }
+
     const response = await fetch("/api/invite-client", {
       method: "POST",
       headers: {
+        Authorization: `Bearer ${session.access_token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         fullName: fullName.trim(),
         email: email.trim(),
-        origin: window.location.origin,
       }),
     });
 

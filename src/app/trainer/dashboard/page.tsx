@@ -1,9 +1,10 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { styles } from "@/lib/design";
 import { supabase } from "@/lib/supabase";
+import { getMondayOf } from "@/lib/dates";
 
 type Client = {
   id: string;
@@ -47,6 +48,19 @@ type DailyTracking = {
   steps_logged: number | null;
 };
 
+type UnreadClientMessage = {
+  id: string;
+  client_id: string;
+  body: string;
+  context_label: string | null;
+  created_at: string;
+  client_name: string;
+};
+
+type WeeklyCheckIn = {
+  client_id: string;
+  week_start: string;
+};
 type ClientStatusCard = {
   client: Client;
   workout: {
@@ -80,7 +94,11 @@ function getStatusClasses(status: "green" | "amber" | "red") {
 export default function TrainerDashboardPage() {
   const [selectedDate, setSelectedDate] = useState(getDateString(new Date()));
   const [clientCards, setClientCards] = useState<ClientStatusCard[]>([]);
+  const [unreadMessages, setUnreadMessages] = useState<UnreadClientMessage[]>([]);
+  const [weeklyCheckIns, setWeeklyCheckIns] = useState<WeeklyCheckIn[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const selectedWeekStart = useMemo(() => getMondayOf(selectedDate), [selectedDate]);
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -90,7 +108,6 @@ export default function TrainerDashboardPage() {
       year: "numeric",
     });
   }, [selectedDate]);
-
   const getDaysSinceLogin = (lastSignIn: string | null) => {
     if (!lastSignIn) return null;
 
@@ -120,6 +137,58 @@ export default function TrainerDashboardPage() {
     if (days <= 7) return "text-amber-600";
     return "text-red-600"; // 8+ days
   };
+
+  const attentionItems = useMemo(() => {
+    const items: Array<{
+      key: string;
+      clientId: string;
+      clientName: string;
+      title: string;
+      detail: string;
+      tone: "gold" | "red" | "amber";
+    }> = [];
+
+    unreadMessages.forEach((message) => {
+      items.push({
+        key: `message-${message.id}`,
+        clientId: message.client_id,
+        clientName: message.client_name,
+        title: "Unread message",
+        detail: message.context_label || message.body,
+        tone: "gold",
+      });
+    });
+
+    clientCards.forEach((card) => {
+      const daysSinceLogin = getDaysSinceLogin(card.client.last_sign_in_at);
+      if (daysSinceLogin !== null && daysSinceLogin > 7) {
+        items.push({
+          key: `inactive-${card.client.id}`,
+          clientId: card.client.id,
+          clientName: card.client.full_name,
+          title: "Inactive over a week",
+          detail: `Last active ${daysSinceLogin} days ago`,
+          tone: "red",
+        });
+      }
+
+      const hasWeeklyCheckIn = weeklyCheckIns.some(
+        (checkIn) => checkIn.client_id === card.client.id
+      );
+      if (!hasWeeklyCheckIn) {
+        items.push({
+          key: `checkin-${card.client.id}`,
+          clientId: card.client.id,
+          clientName: card.client.full_name,
+          title: "Weekly check-in missing",
+          detail: "No check-in submitted for this week",
+          tone: "amber",
+        });
+      }
+    });
+
+    return items.slice(0, 10);
+  }, [clientCards, unreadMessages, weeklyCheckIns]);
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -159,6 +228,9 @@ export default function TrainerDashboardPage() {
 
       const clients = clientsWithAuth as Client[];
       const clientIds = clients.map((client) => client.id);
+      const clientNameMap = new Map(
+        clients.map((client) => [client.id, client.full_name])
+      );
 
       let setLogs: WorkoutSetLog[] = [];
       let mealLogs: MealLogRow[] = [];
@@ -202,6 +274,33 @@ export default function TrainerDashboardPage() {
         if (trackingData) {
           dailyTrackingData = trackingData as DailyTracking[];
         }
+
+        const { data: messageData } = await supabase
+          .from("client_messages")
+          .select("id, client_id, body, context_label, created_at")
+          .in("client_id", clientIds)
+          .eq("sender_role", "client")
+          .is("read_by_trainer_at", null)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        setUnreadMessages(
+          (messageData ?? []).map((message) => ({
+            ...message,
+            client_name: clientNameMap.get(message.client_id) ?? "Client",
+          }))
+        );
+
+        const { data: checkInData } = await supabase
+          .from("client_weekly_check_ins")
+          .select("client_id, week_start")
+          .in("client_id", clientIds)
+          .eq("week_start", selectedWeekStart);
+
+        setWeeklyCheckIns((checkInData ?? []) as WeeklyCheckIn[]);
+      } else {
+        setUnreadMessages([]);
+        setWeeklyCheckIns([]);
       }
 
       const exerciseIds = Array.from(
@@ -377,6 +476,71 @@ export default function TrainerDashboardPage() {
         </div>
       </div>
 
+
+      {!loading && attentionItems.length > 0 && (
+        <div className="mb-6 rounded-lg border border-border-subtle bg-surface-raised p-5 shadow-subtle">
+          <p className="text-sm font-semibold uppercase tracking-wide text-ink-muted">
+            Needs Attention
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">
+            {attentionItems.length} item{attentionItems.length === 1 ? "" : "s"} to review
+          </h2>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {attentionItems.map((item) => (
+              <Link
+                key={item.key}
+                href={`/trainer/clients/${item.clientId}`}
+                className={`block rounded-lg border px-4 py-3 transition hover:bg-surface-sunken ${
+                  item.tone === "red"
+                    ? "border-red-300 bg-red-50"
+                    : item.tone === "gold"
+                    ? "border-gold bg-gold/10"
+                    : "border-amber-300 bg-amber-50"
+                }`}
+              >
+                <p className="text-sm font-semibold text-ink">{item.clientName}</p>
+                <p className="mt-1 text-sm font-medium text-ink">{item.title}</p>
+                <p className="mt-1 text-xs text-ink-muted">{item.detail}</p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+      {!loading && unreadMessages.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gold bg-gold/10 p-5">
+          <p className="text-sm font-semibold uppercase tracking-wide text-ink-muted">
+            New client messages
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">
+            {unreadMessages.length} message{unreadMessages.length === 1 ? "" : "s"} waiting
+          </h2>
+
+          <div className="mt-4 space-y-2">
+            {unreadMessages.map((message) => (
+              <Link
+                key={message.id}
+                href={`/trainer/clients/${message.client_id}`}
+                className="block rounded-lg border border-border-subtle bg-surface-raised px-4 py-3 transition hover:bg-surface-sunken"
+              >
+                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="font-medium text-ink">{message.client_name}</p>
+                    <p className="text-sm text-ink-muted">
+                      {message.context_label || "General message"}
+                    </p>
+                  </div>
+                  <p className="text-sm text-ink">
+                    {message.body.length > 90
+                      ? `${message.body.slice(0, 90)}...`
+                      : message.body}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
       {loading ? (
         <p className={styles.body}>Loading dashboard...</p>
       ) : clientCards.length === 0 ? (
@@ -434,7 +598,7 @@ export default function TrainerDashboardPage() {
                         {card.nutrition.label}
                       </p>
                       <p className="mt-1 text-xs opacity-70">
-                        Water: {card.waterCompleted ? "Complete ✓" : "Not logged"}
+                        Water: {card.waterCompleted ? "Complete âœ“" : "Not logged"}
                       </p>
                     </div>
                   </div>
@@ -447,3 +611,7 @@ export default function TrainerDashboardPage() {
     </>
   );
 }
+
+
+
+

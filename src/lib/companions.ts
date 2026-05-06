@@ -293,6 +293,7 @@ export type AwardXpResult = {
   newXp: number;
   leveledUp: boolean;
   newFormName: string | null;
+  newFormImageUrl: string | null;
   becameMastered: boolean;
 };
 
@@ -361,13 +362,24 @@ export const awardBondXp = async (
       .eq("id", view.companion.id);
   }
 
-  return {
+  const result = {
     awarded: amount,
     newXp,
     leveledUp,
     newFormName: leveledUp ? newForm?.name ?? null : null,
+    newFormImageUrl: leveledUp ? newForm?.image_url ?? null : null,
     becameMastered,
   };
+
+  if (leveledUp && typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("companion:evolved", {
+        detail: result,
+      })
+    );
+  }
+
+  return result;
 };
 
 // =====================================================================
@@ -415,3 +427,4 @@ export const getRecentCompanionEvents = async (
   if (error || !data) return [];
   return data as CompanionEvent[];
 };
+

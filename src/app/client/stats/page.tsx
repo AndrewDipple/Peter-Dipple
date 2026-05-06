@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { awardBondXp } from "@/lib/companions";
-import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Weight } from "lucide-react";
+import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Sparkles, Weight } from "lucide-react";
 import { todayStr } from "@/lib/dates"
+import {
+  isCompanionEnabledForClient,
+  getActiveCompanionView,
+  getRandomLine,
+  type ActiveCompanionView,
+} from "@/lib/companions";
+
 import {
   LineChart,
   Line,
@@ -114,6 +122,10 @@ export default function ClientStatsPage() {
   const [loadingPRs, setLoadingPRs] = useState(false);
 
   const [loading, setLoading] = useState(true);
+
+  const [companionEnabled, setCompanionEnabled] = useState(false);
+const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
+const [companionLine, setCompanionLine] = useState<string | null>(null);
 
 const today = todayStr()
 
@@ -323,6 +335,19 @@ const today = todayStr()
 
     setClient(clientData);
 
+    // Companion (only if enabled for this client)
+const isEnabled = await isCompanionEnabledForClient(clientData.id);
+setCompanionEnabled(isEnabled);
+
+if (isEnabled) {
+  const cv = await getActiveCompanionView(clientData.id);
+  setCompanionView(cv);
+
+  if (cv) {
+    const line = await getRandomLine(cv.path.slug, "general");
+    setCompanionLine(line);
+  }
+}
     // Load personal bests
     await loadPersonalBests(clientData.id);
 
@@ -611,39 +636,58 @@ const handleUploadPhotos = async () => {
                   )}
                 </div>
 
-                {/* Workout Streaks */}
-                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Flame className="text-workout" size={20} />
-                    <h3 className="text-sm font-semibold text-ink">Workout Streaks</h3>
-                  </div>
+{/* Companion / Motivation */}
+<Link
+  href="/client/companion"
+  className="block rounded-xl border border-border-subtle bg-surface-raised p-4 transition hover:border-emerald"
+>
+  <div className="flex items-center gap-2 mb-3">
+    <Sparkles className="text-emerald" size={20} />
+    <h3 className="text-sm font-semibold text-ink">
+      {companionEnabled ? "Your Companion" : "Keep Going"}
+    </h3>
+  </div>
 
-                  {streakData ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between rounded-lg bg-surface-sunken p-3">
-                        <span className="text-sm text-ink-muted">Current Streak</span>
-                        <span className="text-2xl font-bold text-workout">
-                          {streakData.current_streak}
-                        </span>
-                      </div>
+  {companionEnabled && companionView ? (
+    <div className="space-y-3">
+      <div className="flex flex-col items-center gap-2">
+        {companionView.currentForm.image_url ? (
+          <img
+            src={companionView.currentForm.image_url}
+            alt={companionView.currentForm.name}
+            className="h-75 w-75 rounded-lg border border-border-subtle object-cover"
+          />
+        ) : (
+          <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-border-subtle bg-surface-sunken text-2xl">
+            ?
+          </div>
+        )}
+        <div className="text-center">
+          <p className="text-sm font-semibold text-ink">
+            {companionView.companion.custom_name ??
+              companionView.path.default_name ??
+              companionView.path.name}
+          </p>
+          <p className="text-xs text-emerald">
+            {companionView.currentForm.name}
+          </p>
+        </div>
+      </div>
 
-                      <div className="flex items-center justify-between rounded-lg bg-surface-sunken p-3">
-                        <span className="text-sm text-ink-muted">Longest Streak</span>
-                        <span className="text-2xl font-bold text-gold">
-                          {streakData.longest_streak}
-                        </span>
-                      </div>
-
-                      {streakData.last_workout_date && (
-                        <p className="text-xs text-ink-muted text-center">
-                          Last workout: {streakData.last_workout_date}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className={styles.body}>No streak data yet. Complete a workout to start!</p>
-                  )}
-                </div>
+      {companionLine && (
+        <div className="rounded-lg bg-surface-sunken p-3 text-sm italic text-center text-ink">
+          "{companionLine}"
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="rounded-lg bg-surface-sunken p-4 text-center">
+      <p className="text-sm italic text-ink">
+        "Small actions compound. Like leaves, one at a time."
+      </p>
+    </div>
+  )}
+</Link>
 
                 {/* Heaviest Lifts */}
                 <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">

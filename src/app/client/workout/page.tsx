@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { todayStr } from "@/lib/dates";
 import { updateStreak } from "@/lib/streaks";
 import {
   isCompanionEnabledForClient,
@@ -12,6 +13,8 @@ import {
 } from "@/lib/companions";
 import AchievementCelebration from "@/components/AchievementCelebration";
 import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
+import MessageTrainerBox from "@/components/MessageTrainerBox";
+import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
 
 type Client = {
@@ -35,6 +38,15 @@ type ClientProgramDay = {
   day_name: string | null;
   sort_order: number | null;
   completed: boolean | null;
+};
+
+type ClientWorkoutCompletion = {
+  id: string;
+  client_id: string;
+  client_program_id: string;
+  client_program_day_id: string;
+  completed_date: string;
+  completed_at: string | null;
 };
 
 type Exercise = {
@@ -70,6 +82,7 @@ type ClientProgramSetLog = {
   actual_weight_kg: number | null;
   actual_reps: number | null;
   completed: boolean;
+  log_date: string | null;
 };
 
 type DraftValues = {
@@ -78,6 +91,14 @@ type DraftValues = {
 };
 
 type PreviousWeightMap = Record<string, number | null>;
+
+type ExerciseProgressionSuggestion = {
+  lastWeight: number;
+  suggestedWeight: number;
+  sessionsAtWeight: number;
+};
+
+type ProgressionSuggestionMap = Record<string, ExerciseProgressionSuggestion | null>;
 
 type RestTimer = {
   exerciseId: string;
@@ -92,10 +113,38 @@ type CelebrationAchievement = {
   description: string;
 };
 
+const getNextWorkoutDay = (
+  days: ClientProgramDay[],
+  completions: ClientWorkoutCompletion[]
+) => {
+  if (days.length === 0) return null;
+
+  const sortedDays = [...days].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+  );
+
+  const latestCompletion = [...completions].sort((a, b) => {
+    const dateCompare = b.completed_date.localeCompare(a.completed_date);
+    if (dateCompare !== 0) return dateCompare;
+    return (b.completed_at ?? "").localeCompare(a.completed_at ?? "");
+  })[0];
+
+  if (!latestCompletion) return sortedDays[0];
+
+  const completedDayIndex = sortedDays.findIndex(
+    (day) => day.id === latestCompletion.client_program_day_id
+  );
+
+  if (completedDayIndex === -1) return sortedDays[0];
+
+  return sortedDays[(completedDayIndex + 1) % sortedDays.length];
+};
+
 export default function ClientWorkoutPage() {
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
   const [programDays, setProgramDays] = useState<ClientProgramDay[]>([]);
+  const [workoutCompletions, setWorkoutCompletions] = useState<ClientWorkoutCompletion[]>([]);
   const [selectedDayId, setSelectedDayId] = useState("");
   const [currentDay, setCurrentDay] = useState<ClientProgramDay | null>(null);
   const [dayExercises, setDayExercises] = useState<ClientProgramDayExercise[]>([]);
@@ -103,6 +152,7 @@ export default function ClientWorkoutPage() {
   const [setLogs, setSetLogs] = useState<ClientProgramSetLog[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValues>>({});
   const [previousWeights, setPreviousWeights] = useState<PreviousWeightMap>({});
+  const [progressionSuggestions, setProgressionSuggestions] = useState<ProgressionSuggestionMap>({});
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [completingDay, setCompletingDay] = useState(false);
@@ -126,7 +176,7 @@ export default function ClientWorkoutPage() {
   const [companionLine, setCompanionLine] = useState<string | null>(null);
   const lastLineRef = useRef<string | null>(null);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = useMemo(() => todayStr(), []);
 
   useEffect(() => {
     if (!restTimer) return;
@@ -220,10 +270,25 @@ export default function ClientWorkoutPage() {
 
     setProgramDays(daysData);
 
-    const firstIncompleteDay =
-      daysData.find((day) => !day.completed) ?? daysData[0];
+    const { data: completionData, error: completionError } = await supabase
+      .from("client_workout_completions")
+      .select("*")
+      .eq("client_id", clientData.id)
+      .eq("client_program_id", program.id);
 
-    setSelectedDayId(firstIncompleteDay.id);
+    if (completionError) {
+      setDebugMessage(
+        "Workout completion history is not available. Please run the workout completion database migration."
+      );
+      setLoading(false);
+      return;
+    }
+
+    const completions = completionData ?? [];
+    setWorkoutCompletions(completions);
+
+    const nextWorkoutDay = getNextWorkoutDay(daysData, completions);
+    setSelectedDayId(nextWorkoutDay?.id ?? daysData[0].id);
     setLoading(false);
   };
 
@@ -320,6 +385,7 @@ export default function ClientWorkoutPage() {
           .eq("client_id", client.id)
           .eq("client_program_id", clientProgram.id)
           .eq("client_program_day_id", selectedDay.id)
+          .eq("log_date", today)
           .in("client_program_day_exercise_id", exerciseRecordIds);
 
         if (!setLogError && setLogData) {
@@ -342,6 +408,7 @@ export default function ClientWorkoutPage() {
 
       if (exerciseNamesForPrevious.length > 0) {
         const previousWeightLookup: Record<string, number | null> = {};
+        const progressionSuggestionLookup: ProgressionSuggestionMap = {};
 
         for (const exerciseName of exerciseNamesForPrevious) {
           const { data: matchingExercises } = await supabase
@@ -354,25 +421,37 @@ export default function ClientWorkoutPage() {
 
           if (matchingExerciseIds.length === 0) {
             previousWeightLookup[exerciseName] = null;
+            progressionSuggestionLookup[exerciseName] = null;
             continue;
           }
 
           const { data: previousLogs } = await supabase
             .from("client_program_set_logs")
-            .select("actual_weight_kg")
+            .select("actual_weight_kg, actual_reps, completed, log_date, set_number, created_at")
             .eq("client_id", client.id)
             .in("client_program_day_exercise_id", matchingExerciseIds)
+            .lt("log_date", today)
             .not("actual_weight_kg", "is", null)
-            .order("created_at", { ascending: false })
-            .limit(1);
+            .order("log_date", { ascending: false })
+            .order("set_number", { ascending: true });
 
           previousWeightLookup[exerciseName] =
             previousLogs && previousLogs.length > 0
               ? previousLogs[0].actual_weight_kg
               : null;
+
+          const exerciseForSuggestion = enrichedExercises.find(
+            (exercise) => exercise.exercise_name?.trim() === exerciseName
+          );
+
+          progressionSuggestionLookup[exerciseName] =
+            exerciseForSuggestion && previousLogs
+              ? getProgressionSuggestion(exerciseForSuggestion, previousLogs)
+              : null;
         }
 
         setPreviousWeights(previousWeightLookup);
+        setProgressionSuggestions(progressionSuggestionLookup);
       }
     };
 
@@ -392,6 +471,84 @@ export default function ClientWorkoutPage() {
 
   const getDraftKey = (exerciseId: string, setNumber: number) =>
     `${exerciseId}-${setNumber}`;
+
+  const parseTargetReps = (reps: string | null) => {
+    if (!reps) return null;
+
+    const numbers = reps.match(/\d+/g)?.map(Number) ?? [];
+    if (numbers.length === 0) return null;
+
+    return Math.max(...numbers);
+  };
+
+  const roundToNearestHalf = (value: number) => Math.round(value * 2) / 2;
+
+  const getProgressionSuggestion = (
+    exercise: ClientProgramDayExercise,
+    logs: Array<{
+      actual_weight_kg: number | null;
+      actual_reps: number | null;
+      completed: boolean;
+      log_date: string | null;
+      set_number: number;
+    }>
+  ): ExerciseProgressionSuggestion | null => {
+    const targetSets = exercise.sets ?? 0;
+    if (targetSets <= 0) return null;
+
+    const targetReps = parseTargetReps(exercise.reps);
+    const logsByDate = new Map<string, typeof logs>();
+
+    for (const log of logs) {
+      if (!log.log_date || log.actual_weight_kg === null) continue;
+      logsByDate.set(log.log_date, [...(logsByDate.get(log.log_date) ?? []), log]);
+    }
+
+    const completedSessions = Array.from(logsByDate.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, sessionLogs]) => {
+        const completedLogs = sessionLogs.filter((log) => log.completed);
+        if (completedLogs.length < targetSets) return null;
+
+        const firstSets = completedLogs
+          .sort((a, b) => a.set_number - b.set_number)
+          .slice(0, targetSets);
+
+        const weights = firstSets.map((log) => log.actual_weight_kg);
+        if (weights.some((weight) => weight === null)) return null;
+
+        const sessionWeight = weights[0] as number;
+        const sameWeight = weights.every((weight) => weight === sessionWeight);
+        if (!sameWeight) return null;
+
+        const repsHit =
+          targetReps === null ||
+          firstSets.every(
+            (log) => log.actual_reps !== null && log.actual_reps >= targetReps
+          );
+
+        if (!repsHit) return null;
+
+        return { date, weight: sessionWeight };
+      })
+      .filter(Boolean) as Array<{ date: string; weight: number }>;
+
+    if (completedSessions.length < 2) return null;
+
+    const [latest, previous] = completedSessions;
+    if (latest.weight !== previous.weight) return null;
+
+    const increaseFactor = latest.weight < 20 ? 1.1 : 1.05;
+    const suggestedWeight = roundToNearestHalf(latest.weight * increaseFactor);
+
+    if (suggestedWeight <= latest.weight) return null;
+
+    return {
+      lastWeight: latest.weight,
+      suggestedWeight,
+      sessionsAtWeight: 2,
+    };
+  };
 
   const getDefaultReps = (exercise: ClientProgramDayExercise) => {
     if (!exercise.reps) return "";
@@ -483,6 +640,20 @@ export default function ClientWorkoutPage() {
     dayExercises[0] ??
     null;
 
+  const activeProgressionSuggestion = activeExercise?.exercise_name
+    ? progressionSuggestions[activeExercise.exercise_name] ?? null
+    : null;
+
+  const currentDayCompletion = currentDay
+    ? workoutCompletions.find(
+        (completion) =>
+          completion.client_program_day_id === currentDay.id &&
+          completion.completed_date === today
+      ) ?? null
+    : null;
+
+  const currentDayCompletedToday = Boolean(currentDayCompletion);
+
   const upsertSetLog = async ({
     clientId,
     clientProgramId,
@@ -553,6 +724,7 @@ export default function ClientWorkoutPage() {
             client_program_id: clientProgramId,
             client_program_day_id: clientProgramDayId,
             client_program_day_exercise_id: exerciseId,
+            log_date: today,
             set_number: setNumber,
             actual_weight_kg: updates.actual_weight_kg ?? null,
             actual_reps: updates.actual_reps ?? null,
@@ -665,6 +837,28 @@ export default function ClientWorkoutPage() {
         setCompanionLine(null);
       }
     }
+  };
+
+  const applySuggestedWeight = (
+    exercise: ClientProgramDayExercise,
+    suggestedWeight: number
+  ) => {
+    const targetSets = exercise.sets && exercise.sets > 0 ? exercise.sets : 1;
+    const weightValue = String(suggestedWeight);
+
+    setDrafts((prev) => {
+      const next = { ...prev };
+
+      for (let setNumber = 1; setNumber <= targetSets; setNumber += 1) {
+        const key = getDraftKey(exercise.id, setNumber);
+        next[key] = {
+          weight: weightValue,
+          reps: prev[key]?.reps ?? getDisplayReps(exercise, setNumber),
+        };
+      }
+
+      return next;
+    });
   };
 
   const handleWeightChange = (
@@ -816,43 +1010,82 @@ export default function ClientWorkoutPage() {
   };
 
   const handleToggleDayCompletion = async () => {
-    if (!currentDay) return;
+    if (!client || !clientProgram || !currentDay) return;
 
     setCompletingDay(true);
 
-    const newCompletedStatus = !currentDay.completed;
+    if (currentDayCompletedToday && currentDayCompletion) {
+      const { error } = await supabase
+        .from("client_workout_completions")
+        .delete()
+        .eq("id", currentDayCompletion.id);
 
-    const { error } = await supabase
-      .from("client_program_days")
-      .update({ completed: newCompletedStatus })
-      .eq("id", currentDay.id);
+      if (error) {
+        alert("Error marking workout incomplete");
+        setCompletingDay(false);
+        return;
+      }
+
+      setWorkoutCompletions((prev) =>
+        prev.filter((completion) => completion.id !== currentDayCompletion.id)
+      );
+      setCompletingDay(false);
+      alert("Workout day marked as incomplete for today.");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("client_workout_completions")
+      .upsert(
+        {
+          client_id: client.id,
+          client_program_id: clientProgram.id,
+          client_program_day_id: currentDay.id,
+          completed_date: today,
+          completed_at: new Date().toISOString(),
+        },
+        {
+          onConflict:
+            "client_id,client_program_id,client_program_day_id,completed_date",
+        }
+      )
+      .select()
+      .single();
 
     if (error) {
-      alert(`Error ${newCompletedStatus ? 'completing' : 'marking incomplete'} day`);
+      alert("Error completing workout day");
       setCompletingDay(false);
       return;
     }
 
-    const updatedDays = programDays.map((day) =>
-      day.id === currentDay.id ? { ...day, completed: newCompletedStatus } : day
+    const updatedCompletions = [
+      ...workoutCompletions.filter(
+        (completion) =>
+          !(
+            completion.client_program_day_id === currentDay.id &&
+            completion.completed_date === today
+          )
+      ),
+      data,
+    ];
+
+    setWorkoutCompletions(updatedCompletions);
+
+    const sortedDays = [...programDays].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
     );
+    const currentDayIndex = sortedDays.findIndex((day) => day.id === currentDay.id);
+    const nextDay =
+      currentDayIndex >= 0
+        ? sortedDays[(currentDayIndex + 1) % sortedDays.length]
+        : getNextWorkoutDay(programDays, updatedCompletions);
 
-    setProgramDays(updatedDays);
-
-    // Update current day state
-    setCurrentDay({ ...currentDay, completed: newCompletedStatus });
-
-    // Only navigate to next incomplete day if marking as complete
-    if (newCompletedStatus) {
-      const nextDay = updatedDays.find((day) => !day.completed);
-
-      if (nextDay) {
-        setSelectedDayId(nextDay.id);
-      }
+    if (nextDay) {
+      setSelectedDayId(nextDay.id);
     }
 
     setCompletingDay(false);
-    alert(`Workout day ${newCompletedStatus ? 'completed' : 'marked as incomplete'}!`);
+    alert("Workout day completed!");
   };
 
   const formatTime = (seconds: number) => {
@@ -975,7 +1208,13 @@ export default function ClientWorkoutPage() {
                   {programDays.map((day) => (
                     <option key={day.id} value={day.id}>
                       {day.day_name || "Workout Day"}
-                      {day.completed ? " ✓" : ""}
+                      {workoutCompletions.some(
+                        (completion) =>
+                          completion.client_program_day_id === day.id &&
+                          completion.completed_date === today
+                      )
+                        ? " - done today"
+                        : ""}
                     </option>
                   ))}
                 </select>
@@ -1001,6 +1240,8 @@ export default function ClientWorkoutPage() {
               </div>
             </div>
           </div>
+
+          <ClientUnreadRepliesBanner clientId={client.id} />
 
           <div className="space-y-4">
             {dayExercises.length > 0 && activeExercise ? (
@@ -1080,23 +1321,62 @@ export default function ClientWorkoutPage() {
 
                       {/* Alternative Exercise Button */}
                       {!activeExercise.is_custom &&
-                        activeExercise.exercise_details?.alternative_exercises &&
-                        activeExercise.exercise_details.alternative_exercises.length > 0 && (
-                          <button
-                            onClick={() =>
-                              setAlternativeModalExercise({
-                                exercise: activeExercise.exercise_details,
-                                clientProgramDayExerciseId: activeExercise.id,
-                              })
-                            }
-                            className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-sunken px-3 py-1.5 text-xs font-medium text-ink-muted hover:bg-surface-raised hover:text-ink"
-                          >
-                            <RefreshCw size={14} />
-                            Alternative
-                          </button>
-                        )}
+activeExercise.exercise_details?.alternate && (
+  <button
+    onClick={() =>
+      setAlternativeModalExercise({
+        exercise: activeExercise.exercise_details,
+        clientProgramDayExerciseId: activeExercise.id,
+      })
+    }
+    className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-sunken px-3 py-1.5 text-xs font-medium text-ink-muted hover:bg-surface-raised hover:text-ink"
+  >
+    <RefreshCw size={14} />
+    Alternative
+  </button>
+)}
+
                     </div>
                   </div>
+
+                  {activeProgressionSuggestion && (
+                    <div className="mt-4 rounded-xl border border-gold bg-gold/10 p-4">
+                      <div className="flex items-start gap-3">
+                        {companionEnabled && companionView?.currentForm.image_url && (
+                          <img
+                            src={companionView.currentForm.image_url}
+                            alt={companionView.currentForm.name}
+                            className="h-10 w-10 shrink-0 rounded-full border border-gold/40 object-cover"
+                          />
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-ink">
+                            {companionEnabled && companionView
+                              ? companionView.currentForm.name
+                              : "Progression suggestion"}
+                          </p>
+                          <p className="mt-1 text-sm text-ink-muted">
+                            I feel like you can lift heavier this week; let's try {activeProgressionSuggestion.suggestedWeight}kg.
+                            You completed your last {activeProgressionSuggestion.sessionsAtWeight} sessions at {activeProgressionSuggestion.lastWeight}kg.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applySuggestedWeight(
+                              activeExercise,
+                              activeProgressionSuggestion.suggestedWeight
+                            )
+                          }
+                          className="shrink-0 rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-ink hover:bg-gold/90"
+                        >
+                          Use {activeProgressionSuggestion.suggestedWeight}kg
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {activeExercise.exercise_details && (
                     <div className="mt-3 grid gap-2 rounded-xl bg-surface-sunken p-3 text-sm md:grid-cols-3">
@@ -1293,6 +1573,16 @@ export default function ClientWorkoutPage() {
             )}
           </div>
 
+          <MessageTrainerBox
+            clientId={client.id}
+            contextType="workout_day"
+            contextId={currentDay.id}
+            contextLabel={currentDay.day_name || "Workout day"}
+            title="Workout note"
+            placeholder="How did this workout feel? Anything your trainer should know?"
+            accent="workout"
+          />
+
           {/* Add Custom Exercise Section */}
           {!showAddExercise ? (
             <button
@@ -1386,7 +1676,7 @@ export default function ClientWorkoutPage() {
             onClick={handleToggleDayCompletion}
             disabled={completingDay}
             className={`flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50 ${
-              currentDay.completed 
+              currentDayCompletedToday 
                 ? styles.buttonSecondary 
                 : styles.buttonPrimaryWorkout
             }`}
@@ -1394,14 +1684,14 @@ export default function ClientWorkoutPage() {
             {completingDay ? (
               <>
                 <RefreshCw size={20} className="animate-spin" />
-                {currentDay.completed ? "Marking Incomplete..." : "Completing..."}
+                {currentDayCompletedToday ? "Marking Incomplete..." : "Completing..."}
               </>
             ) : (
               <>
-                {currentDay.completed ? (
+                {currentDayCompletedToday ? (
                   <>
                     <XCircle size={20} />
-                    Mark Day as Incomplete
+                    Mark Today as Incomplete
                   </>
                 ) : (
                   <>

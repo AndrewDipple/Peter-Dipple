@@ -18,6 +18,9 @@ import {
   Bell,
 } from "lucide-react";
 import Logo from "./Logo";
+import CompanionEvolutionCelebration, {
+  type CompanionEvolutionCelebrationData,
+} from "./CompanionEvolutionCelebration";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Role, isStaff } from "@/lib/roles";
 
@@ -69,6 +72,8 @@ export default function AppShell({ userType, children }: Props) {
   const [feedbackDescription, setFeedbackDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  const [companionEvolution, setCompanionEvolution] =
+    useState<CompanionEvolutionCelebrationData | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +132,18 @@ export default function AppShell({ userType, children }: Props) {
 
     fetchProfile();
   }, [userType]);
+
+  useEffect(() => {
+    const handleCompanionEvolution = (event: Event) => {
+      const customEvent = event as CustomEvent<CompanionEvolutionCelebrationData>;
+      setCompanionEvolution(customEvent.detail);
+    };
+
+    window.addEventListener("companion:evolved", handleCompanionEvolution);
+    return () => {
+      window.removeEventListener("companion:evolved", handleCompanionEvolution);
+    };
+  }, []);
 
   useEffect(() => {
     const checkNotifications = async () => {
@@ -357,6 +374,11 @@ export default function AppShell({ userType, children }: Props) {
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">{children}</div>
       </main>
 
+      <CompanionEvolutionCelebration
+        celebration={companionEvolution}
+        onClose={() => setCompanionEvolution(null)}
+      />
+
       {feedbackModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-lifted">
@@ -428,3 +450,6 @@ Cancel
     </>
   );
 }
+
+
+

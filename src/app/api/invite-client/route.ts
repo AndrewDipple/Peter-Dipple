@@ -1,20 +1,35 @@
 import { createClient } from "@supabase/supabase-js";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(request: Request) {
+const isStaffRole = (role: string | null | undefined) =>
+  role === "trainer" || role === "admin";
+
+const getAppOrigin = (request: NextRequest) => {
+  const configuredOrigin =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.APP_ORIGIN ||
+    process.env.SITE_URL;
+
+  return (configuredOrigin || request.nextUrl.origin).replace(/\/$/, "");
+};
+
+export async function POST(request: NextRequest) {
   try {
-    const { fullName, email, origin } = await request.json();
+    const { fullName, email } = await request.json();
 
     if (!fullName || !email) {
       return NextResponse.json({ error: "Missing name or email" }, { status: 400 });
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !supabaseKey) {
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseKey) {
       console.error("Missing env vars", {
         hasUrl: !!supabaseUrl,
+        hasAnonKey: !!supabaseAnonKey,
         hasKey: !!supabaseKey,
       });
       return NextResponse.json(
@@ -23,11 +38,51 @@ export async function POST(request: Request) {
       );
     }
 
+    const authHeader = request.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length)
+      : null;
+
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    });
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseUser.auth.getUser(token);
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: profile, error: profileLookupError } = await supabaseUser
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileLookupError || !isStaffRole(profile?.role)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+    const redirectOrigin = getAppOrigin(request);
 
     const { data, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: { full_name: fullName, role: "client" },
-      redirectTo: `${origin}/reset-password`,
+      redirectTo: `${redirectOrigin}/reset-password`,
     });
 
     if (inviteError || !data.user) {
@@ -68,10 +123,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Unhandled error in invite-client", err);
+    const message = err instanceof Error ? err.message : "unknown";
     return NextResponse.json(
-      { error: `Unexpected error: ${err?.message || "unknown"}` },
+      { error: `Unexpected error: ${message}` },
       { status: 500 }
     );
   }

@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyProgramAssigned } from "@/components/notifications";
+import TrainerClientMessages from "@/components/TrainerClientMessages";
+import TrainerClientInsights from "@/components/TrainerClientInsights";
 import { styles } from "@/lib/design";
 import Link from "next/link";
+import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
 import {
   LineChart,
   Line,
@@ -32,6 +35,8 @@ type Client = {
   tdee_estimate: number | null;
   onboarding_complete: boolean | null;
   daily_step_target: number;
+    calorie_adjustment: number | null;          // NEW
+  trainer_activity_level: string | null;      // NEW
 };
 
 type MealLog = {
@@ -187,6 +192,27 @@ function formatLabel(value: string | null | undefined) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function getActivityFactor(activityLevel: string | null | undefined) {
+  const factors: Record<string, number> = {
+    sedentary: 1.2,
+    lightly_active: 1.375,
+    moderately_active: 1.55,
+    very_active: 1.725,
+    extra_active: 1.9,
+  };
+
+  if (!activityLevel) return 1.2;
+  return factors[activityLevel] ?? 1.2;
+}
+
+const ACTIVITY_OPTIONS = [
+  { value: "sedentary", label: "Sedentary (little/no exercise)" },
+  { value: "lightly_active", label: "Lightly active (1-3 days/week)" },
+  { value: "moderately_active", label: "Moderately active (3-5 days/week)" },
+  { value: "very_active", label: "Very active (6-7 days/week)" },
+  { value: "extra_active", label: "Extra active (physical job + training)" },
+];
+
 export default function ClientDetailPage({ params }: PageProps) {
   const [clientId, setClientId] = useState("");
   const [client, setClient] = useState<Client | null>(null);
@@ -224,6 +250,11 @@ export default function ClientDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [assigningTemplate, setAssigningTemplate] = useState(false);
   const [selectedDate, setSelectedDate] = useState(getDateString(new Date()));
+
+const [trainerActivity, setTrainerActivity] = useState<string>("");
+const [calorieAdjustment, setCalorieAdjustment] = useState<string>("0");
+const [savingTarget, setSavingTarget] = useState(false);
+const [savedFlash, setSavedFlash] = useState(false);
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -317,6 +348,21 @@ export default function ClientDetailPage({ params }: PageProps) {
     };
   }, [client, todayCalories]);
 
+const proposedTarget = useMemo(() => {
+  if (!client?.bmr_estimate || !trainerActivity) return null;
+
+  const factor = getActivityFactor(trainerActivity);
+  const tdee = client.bmr_estimate * factor;
+  const adjustment = parseInt(calorieAdjustment) || 0;
+
+  return Math.round(tdee + adjustment);
+}, [client?.bmr_estimate, trainerActivity, calorieAdjustment]);
+
+const proposedTdee = useMemo(() => {
+  if (!client?.bmr_estimate || !trainerActivity) return null;
+  return Math.round(client.bmr_estimate * getActivityFactor(trainerActivity));
+}, [client?.bmr_estimate, trainerActivity]);
+
   useEffect(() => {
     const loadBaseData = async () => {
       const resolvedParams = await params;
@@ -330,6 +376,16 @@ export default function ClientDetailPage({ params }: PageProps) {
         .single();
 
       if (clientData) setClient(clientData);
+
+if (clientData) {
+  setClient(clientData);
+
+  // Initialise the calorie panel inputs from the loaded client.
+  setTrainerActivity(
+    clientData.trainer_activity_level ?? clientData.activity_level ?? ""
+  );
+  setCalorieAdjustment(String(clientData.calorie_adjustment ?? 0));
+}
 
       const { data: weightData } = await supabase
         .from("client_weight_logs")
@@ -685,19 +741,25 @@ export default function ClientDetailPage({ params }: PageProps) {
           return;
         }
 
-        if (templateExercises?.length) {
-          const clientExerciseRows = templateExercises.map((exercise) => ({
-            client_program_day_id: clientDay.id,
-            exercise_name: exercise.exercise_name,
-            sets: exercise.sets,
-            reps: exercise.reps,
-            target_weight_kg: exercise.target_weight_kg,
-            sort_order: exercise.sort_order,
-          }));
+if (templateExercises?.length) {
+  // Look up exercise_id for each name so we get videos, rest timer, alternates etc.
+  const exerciseIdMap = await lookupExerciseIdsByName(
+    templateExercises.map((e) => e.exercise_name)
+  );
 
-          const { error: insertExercisesError } = await supabase
-            .from("client_program_day_exercises")
-            .insert(clientExerciseRows);
+  const clientExerciseRows = templateExercises.map((exercise) => ({
+    client_program_day_id: clientDay.id,
+    exercise_id: getExerciseIdForName(exerciseIdMap, exercise.exercise_name),
+    exercise_name: exercise.exercise_name,
+    sets: exercise.sets,
+    reps: exercise.reps,
+    target_weight_kg: exercise.target_weight_kg,
+    sort_order: exercise.sort_order,
+  }));
+
+  const { error: insertExercisesError } = await supabase
+    .from("client_program_day_exercises")
+    .insert(clientExerciseRows);
 
           if (insertExercisesError) {
             alert("Error creating client programme exercises");
@@ -728,7 +790,41 @@ alert("Template assigned!");
 setClientProgram(newProgram);
 setAssigningTemplate(false);
   };
+const handleSaveCalorieTarget = async () => {
+  if (!client || proposedTarget === null) return;
 
+  setSavingTarget(true);
+
+  const adjustment = parseInt(calorieAdjustment) || 0;
+
+  const { error } = await supabase
+    .from("clients")
+    .update({
+      calorie_target: proposedTarget,
+      calorie_adjustment: adjustment,
+      trainer_activity_level: trainerActivity,
+    })
+    .eq("id", client.id);
+
+  if (error) {
+    alert("Could not save calorie target");
+    setSavingTarget(false);
+    return;
+  }
+
+  // Mirror saved values back into local state so the existing summary card
+  // updates immediately without a refetch.
+  setClient({
+    ...client,
+    calorie_target: proposedTarget,
+    calorie_adjustment: adjustment,
+    trainer_activity_level: trainerActivity,
+  });
+
+  setSavingTarget(false);
+  setSavedFlash(true);
+  setTimeout(() => setSavedFlash(false), 2000);
+};
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
   return (
@@ -844,6 +940,93 @@ setAssigningTemplate(false);
                   </p>
                 </div>
               </div>
+            <div className={`${styles.card} mt-4`}>
+  <h3 className="font-semibold text-ink">Calorie Target Override</h3>
+  <p className="mt-1 text-sm text-ink-muted">
+    Adjust the activity level and calorie offset to set this client's daily target.
+  </p>
+
+  <div className="mt-4 grid gap-3 md:grid-cols-4">
+    {/* BMR — read-only */}
+    <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+        BMR
+      </p>
+      <p className="mt-1 text-lg font-semibold text-ink">
+        {client.bmr_estimate ? `${client.bmr_estimate} kcal` : "-"}
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">From onboarding</p>
+    </div>
+
+    {/* Activity level — editable */}
+    <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+      <label className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+        Activity Level
+      </label>
+      <select
+        value={trainerActivity}
+        onChange={(e) => setTrainerActivity(e.target.value)}
+        className={`${styles.input} mt-1`}
+      >
+        <option value="">Select</option>
+        {ACTIVITY_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      {client.trainer_activity_level &&
+        client.trainer_activity_level !== client.activity_level && (
+          <p className="mt-1 text-xs text-ink-muted">
+            Client said: {formatLabel(client.activity_level)}
+          </p>
+        )}
+    </div>
+
+    {/* Adjustment — editable */}
+    <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+      <label className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+        Adjustment
+      </label>
+      <input
+        type="number"
+        value={calorieAdjustment}
+        onChange={(e) => setCalorieAdjustment(e.target.value)}
+        className={`${styles.input} mt-1`}
+        placeholder="0"
+      />
+      <p className="mt-1 text-xs text-ink-muted">
+        + for surplus, − for deficit
+      </p>
+    </div>
+
+    {/* Proposed target — computed */}
+    <div className="rounded-xl border border-emerald p-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+        New Calorie Target
+      </p>
+      <p className="mt-1 text-lg font-bold text-ink">
+        {proposedTarget !== null ? `${proposedTarget} kcal` : "-"}
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">
+        TDEE: {proposedTdee !== null ? `${proposedTdee} kcal` : "-"}
+      </p>
+    </div>
+  </div>
+
+  <div className="mt-4 flex items-center gap-3">
+    <button
+      onClick={handleSaveCalorieTarget}
+      disabled={savingTarget || proposedTarget === null}
+      className={`${styles.buttonPrimary} disabled:opacity-50`}
+    >
+      {savingTarget ? "Saving..." : "Save Calorie Target"}
+    </button>
+    {savedFlash && (
+      <span className="text-sm font-medium text-emerald">✓ Saved</span>
+    )}
+  </div>
+</div>
             </div>
 
             <div className={`${styles.card} mt-4`}>
@@ -893,6 +1076,12 @@ setAssigningTemplate(false);
               </div>
             </div>
           </section>
+
+          <section>
+            <TrainerClientMessages clientId={client.id} />
+          </section>
+
+          <TrainerClientInsights clientId={client.id} />
 
           {/* DAILY REVIEW */}
           <section>

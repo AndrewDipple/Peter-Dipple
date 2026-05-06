@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
 
 type Client = {
   id: string;
@@ -260,16 +261,22 @@ export default function ClientOnboardingPage() {
 
       if (exercisesError) throw new Error("Could not load template exercises");
 
-      const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
-        (exercise) => ({
-          client_program_day_id: clientDay.id,
-          exercise_name: exercise.exercise_name,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          target_weight_kg: exercise.target_weight_kg,
-          sort_order: exercise.sort_order,
-        })
-      );
+// Look up exercise_id for each name so we get videos, rest timer, alternates etc.
+const exerciseIdMap = await lookupExerciseIdsByName(
+  ((templateExercises ?? []) as TemplateExercise[]).map((e) => e.exercise_name)
+);
+
+const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
+  (exercise) => ({
+    client_program_day_id: clientDay.id,
+    exercise_id: getExerciseIdForName(exerciseIdMap, exercise.exercise_name),
+    exercise_name: exercise.exercise_name,
+    sets: exercise.sets,
+    reps: exercise.reps,
+    target_weight_kg: exercise.target_weight_kg,
+    sort_order: exercise.sort_order,
+  })
+);
 
       if (exerciseRows.length > 0) {
         const { error: insertExerciseError } = await supabase
@@ -351,6 +358,17 @@ export default function ClientOnboardingPage() {
       setSubmitting(false);
       return;
     }
+// Record the onboarding weight as the first entry in the weight log timeline
+// so it appears on stats graphs.
+const today = new Date().toISOString().split("T")[0];
+await supabase.from("client_weight_logs").insert([
+  {
+    client_id: client.id,
+    weight_kg: weightNumber,
+    log_date: today,
+    note: "Initial weight (onboarding)",
+  },
+]);
 
     try {
       await assignTemplateToClient(client.id, selectedTemplate.id);

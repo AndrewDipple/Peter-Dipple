@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { updateStreak } from "@/lib/streaks";
 import { awardBondXp } from "@/lib/companions";
+import MessageTrainerBox from "@/components/MessageTrainerBox";
+import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import {
   todayStr,
   addDays,
@@ -98,6 +100,47 @@ export default function ClientNutritionPage() {
   }, [customMeals]);
 
   const totalCalories = recipeCaloriesTotal + customCaloriesTotal;
+
+type EatenMeal = {
+  key: string;
+  source: "recipe" | "custom";
+  name: string;
+  calories: number;
+  note: string | null;
+  removeId: string;
+  createdAt: string;
+};
+
+const eatenMeals = useMemo<EatenMeal[]>(() => {
+  const recipeRows: EatenMeal[] = mealLogs.map((meal) => {
+    const quantity = meal.quantity ?? 1;
+    const caloriesPerMeal = meal.recipes?.calories ?? 0;
+    return {
+      key: `recipe-${meal.id}`,
+      source: "recipe",
+      name: meal.recipes?.name || "Unnamed meal",
+      calories: caloriesPerMeal * quantity,
+      note: null,
+      removeId: meal.id,
+      createdAt: meal.log_date, // we don't have timestamp on these in state
+    };
+  });
+
+  const customRows: EatenMeal[] = customMeals.map((meal) => ({
+    key: `custom-${meal.id}`,
+    source: "custom",
+    name: meal.meal_name,
+    calories: meal.calories ?? 0,
+    note: meal.note,
+    removeId: meal.id,
+    createdAt: meal.log_date,
+  }));
+
+  // Recipe and custom queries both order newest-first; merging preserves
+  // approximate order. For perfect ordering we'd need a created_at field —
+  // good enough for v1.
+  return [...recipeRows, ...customRows];
+}, [mealLogs, customMeals]);
 
   // Compute the unfulfilled-chips list. For each planned recipe, show
   // (planned count − logged count) chips. If logged ≥ planned, hide.
@@ -391,6 +434,14 @@ const handleAddCustomMeal = async () => {
     setRemovingCustomMealId(null);
   };
 
+const handleRemoveEatenMeal = async (meal: EatenMeal) => {
+  if (meal.source === "recipe") {
+    await handleRemoveRecipeMeal(meal.removeId);
+  } else {
+    await handleRemoveCustomMeal(meal.removeId);
+  }
+};
+
   return (
     <>
       <h1 className={styles.display}>Nutrition</h1>
@@ -438,6 +489,8 @@ const handleAddCustomMeal = async () => {
       </div>
 
       <div className="mt-6 space-y-6">
+        {clientId && <ClientUnreadRepliesBanner clientId={clientId} />}
+
         {/* Calorie summary */}
         <div className={`${styles.card} bg-surface-sunken`}>
           <h2 className={styles.h2}>Calories {isToday ? "Today" : "for the day"}</h2>
@@ -445,24 +498,36 @@ const handleAddCustomMeal = async () => {
           <p className="mt-1 text-sm text-ink-muted">{formatLongDate(selectedDate)}</p>
         </div>
 
+        {clientId && (
+          <MessageTrainerBox
+            clientId={clientId}
+            contextType="nutrition"
+            contextId={selectedDate}
+            contextLabel={`Nutrition - ${formatLongDate(selectedDate)}`}
+            title="Nutrition question"
+            placeholder="Ask about meals, travel, swaps, or anything nutrition-related..."
+            accent="nutrition"
+          />
+        )}
+
         {/* Three quick links */}
         <div className="grid gap-4 md:grid-cols-3">
           <Link
             href="/client/meal-planner"
-            className={`${styles.cardInteractive} bg-surface-sunken`}
+            className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}
           >
-            <p className="text-sm text-ink-muted">Meal Planner</p>
+            <p className="text-xl font-bold text-emerald">Planner</p>
             <p className="mt-1 text-lg font-semibold text-ink">Plan meals ahead of time</p>
-            <p className="mt-2 text-sm text-ink-muted">
+            <p className="mt-2 textxs text-ink-muted">
               Build your upcoming meals before the day arrives
             </p>
           </Link>
 
           <Link
             href="/client/shopping-list"
-            className={`${styles.cardInteractive} bg-surface-sunken`}
+            className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}
           >
-            <p className="text-sm text-ink-muted">Shopping List</p>
+            <p className="text-xl font-bold text-emerald">Shopping List</p>
             <p className="mt-1 text-lg font-semibold text-ink">
               Collated ingredients from planned meals
             </p>
@@ -471,8 +536,8 @@ const handleAddCustomMeal = async () => {
             </p>
           </Link>
 
-          <Link href="/recipes" className={`${styles.cardInteractive} bg-surface-sunken`}>
-            <p className="text-sm text-ink-muted">Recipe Menu</p>
+          <Link href="/recipes" className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}>
+            <p className="text-xl font-bold text-emerald"> Menu</p>
             <p className="mt-1 text-lg font-semibold text-ink">Browse all available recipes</p>
             <p className="mt-2 text-sm text-ink-muted">
               View full recipe details, ingredients, and nutrition info
@@ -514,47 +579,94 @@ const handleAddCustomMeal = async () => {
           </div>
         )}
 
-        {/* Logged recipe meals */}
-        <div className={styles.card}>
-          <h2 className={styles.h2}>
-            {isToday ? "Today's Recipe Meals" : "Recipe Meals"}
-          </h2>
-          <div className="mt-4 space-y-2">
-            {mealLogs.length === 0 ? (
-              <p className={styles.body}>No recipe meals logged.</p>
-            ) : (
-              mealLogs.map((meal) => {
-                const quantity = meal.quantity ?? 1;
-                const caloriesPerMeal = meal.recipes?.calories ?? 0;
-                const totalMealCalories = caloriesPerMeal * quantity;
+{/* Merged eaten meals list */}
+<div className={styles.card}>
+  <h2 className={styles.h2}>
+    {isToday ? "What I've eaten today" : "Meals"}
+  </h2>
+  <div className="mt-4 space-y-2">
+    {eatenMeals.length === 0 ? (
+      <p className={styles.body}>No meals logged.</p>
+    ) : (
+      eatenMeals.map((meal) => {
+        const isRemoving =
+          (meal.source === "recipe" && removingMealId === meal.removeId) ||
+          (meal.source === "custom" && removingCustomMealId === meal.removeId);
 
-                return (
-                  <div
-                    key={meal.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink">
-                        {meal.recipes?.name || "Unnamed meal"}
-                      </p>
-                      <p className="text-xs text-ink-muted">
-                        {totalMealCalories} kcal
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveRecipeMeal(meal.id)}
-                      disabled={removingMealId === meal.id}
-                      className="rounded-xl border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                );
-              })
-            )}
+        return (
+          <div
+            key={meal.key}
+            className="flex items-start justify-between gap-3 rounded-lg border border-border-subtle px-3 py-2"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-medium text-ink">
+                  {meal.name}
+                </p>
+                {meal.source === "custom" && (
+                  <span className="shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                    Custom
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-ink-muted">
+                {meal.calories} kcal
+              </p>
+              {meal.note && (
+                <p className="mt-1 text-xs text-ink-muted">{meal.note}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => handleRemoveEatenMeal(meal)}
+              disabled={isRemoving}
+              className="shrink-0 rounded-xl border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        );
+      })
+    )}
+  </div>
+</div>
+
+
+        {/* Add recipe meal — moved to bottom */}
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Manually Add Recipe Meal</h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            Use this if you ate a recipe that wasn't on your plan for the day.
+          </p>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div>
+              <label className="text-sm font-medium text-ink">Choose a recipe</label>
+              <select
+                value={selectedRecipeId}
+                onChange={(e) => setSelectedRecipeId(e.target.value)}
+                className={styles.input}
+              >
+                <option value="">Select a recipe</option>
+                {recipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>
+                    {recipe.name}
+                    {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={handleAddRecipeMeal}
+              disabled={addingRecipe}
+              className={styles.buttonPrimaryNutrition}
+            >
+              {addingRecipe ? "Adding..." : "Add to Eaten Meals"}
+            </button>
           </div>
         </div>
+
 
         {/* Add custom meal */}
         <div className={styles.card}>
@@ -604,77 +716,7 @@ const handleAddCustomMeal = async () => {
           </button>
         </div>
 
-        {/* Logged custom meals */}
-        <div className={styles.card}>
-          <h2 className={styles.h2}>
-            {isToday ? "Today's Custom Meals" : "Custom Meals"}
-          </h2>
-          <div className="mt-4 space-y-2">
-            {customMeals.length === 0 ? (
-              <p className={styles.body}>No custom meals logged.</p>
-            ) : (
-              customMeals.map((meal) => (
-                <div
-                  key={meal.id}
-                  className="flex flex-col gap-3 rounded-lg border border-border-subtle px-3 py-3 md:flex-row md:items-center md:justify-between"
-                >
-                  <div>
-                    <p className="font-medium text-ink">{meal.meal_name}</p>
-                    {meal.note && (
-                      <p className="text-sm text-ink-muted">{meal.note}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm font-medium text-ink">{meal.calories} kcal</p>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveCustomMeal(meal.id)}
-                      disabled={removingCustomMealId === meal.id}
-                      className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
 
-        {/* Add recipe meal — moved to bottom */}
-        <div className={styles.card}>
-          <h2 className={styles.h2}>Add Recipe Meal (Off-Plan)</h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Use this if you ate a recipe that wasn't on your plan for the day.
-          </p>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-            <div>
-              <label className="text-sm font-medium text-ink">Choose a recipe</label>
-              <select
-                value={selectedRecipeId}
-                onChange={(e) => setSelectedRecipeId(e.target.value)}
-                className={styles.input}
-              >
-                <option value="">Select a recipe</option>
-                {recipes.map((recipe) => (
-                  <option key={recipe.id} value={recipe.id}>
-                    {recipe.name}
-                    {recipe.calories !== null ? ` (${recipe.calories} kcal)` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              onClick={handleAddRecipeMeal}
-              disabled={addingRecipe}
-              className={styles.buttonPrimaryNutrition}
-            >
-              {addingRecipe ? "Adding..." : "Add to Eaten Meals"}
-            </button>
-          </div>
-        </div>
       </div>
     </>
   );

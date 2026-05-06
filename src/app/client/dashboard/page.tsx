@@ -1,20 +1,25 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { todayStr } from "@/lib/dates";
+import { getMondayOf, todayStr } from "@/lib/dates";
 import { updateStreak, checkStreakReminders } from "@/lib/streaks";
+import TourModal from "@/components/TourModal";
+import MessageTrainerBox from "@/components/MessageTrainerBox";
+import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
+import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
+import WeeklyCheckInCard from "@/components/WeeklyCheckInCard";
 import {
   getActiveCompanionView,
   isCompanionEnabledForClient,
   awardBondXp,
   type ActiveCompanionView,
 } from "@/lib/companions";
-// import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch — see commit notes.
-// import Leaderboard from "@/components/Leaderboard";     // Removed for launch — competitive mechanics deferred.
+// import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch â€” see commit notes.
+// import Leaderboard from "@/components/Leaderboard";     // Removed for launch â€” competitive mechanics deferred.
 import { Sparkles } from "lucide-react";
 
 type Client = {
@@ -24,6 +29,7 @@ type Client = {
   protein_g: number | null;
   profile_id: string | null;
   onboarding_complete: boolean | null;
+  tour_completed_at: string | null;  // NEW
   daily_step_target: number;
 };
 
@@ -39,6 +45,15 @@ type ClientProgramDay = {
   day_name: string | null;
   sort_order: number | null;
   completed: boolean | null;
+};
+
+type ClientWorkoutCompletion = {
+  id: string;
+  client_id: string;
+  client_program_id: string;
+  client_program_day_id: string;
+  completed_date: string;
+  completed_at: string | null;
 };
 
 type ClientProgramDayExercise = {
@@ -88,12 +103,41 @@ type ClientMilestone = {
   photo_log_date: string | null;
 };
 
+const getNextWorkoutDay = (
+  days: ClientProgramDay[],
+  completions: ClientWorkoutCompletion[]
+) => {
+  if (days.length === 0) return null;
+
+  const sortedDays = [...days].sort(
+    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+  );
+
+  const latestCompletion = [...completions].sort((a, b) => {
+    const dateCompare = b.completed_date.localeCompare(a.completed_date);
+    if (dateCompare !== 0) return dateCompare;
+    return (b.completed_at ?? "").localeCompare(a.completed_at ?? "");
+  })[0];
+
+  if (!latestCompletion) return sortedDays[0];
+
+  const completedDayIndex = sortedDays.findIndex(
+    (day) => day.id === latestCompletion.client_program_day_id
+  );
+
+  if (completedDayIndex === -1) return sortedDays[0];
+
+  return sortedDays[(completedDayIndex + 1) % sortedDays.length];
+};
+
 export default function ClientDashboardPage() {
   const router = useRouter();
 
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
   const [currentDay, setCurrentDay] = useState<ClientProgramDay | null>(null);
+  const [programDays, setProgramDays] = useState<ClientProgramDay[]>([]);
+  const [workoutCompletions, setWorkoutCompletions] = useState<ClientWorkoutCompletion[]>([]);
   const [dayExercises, setDayExercises] = useState<ClientProgramDayExercise[]>([]);
   const [setLogs, setSetLogs] = useState<ClientProgramSetLog[]>([]);
   const [todayCalories, setTodayCalories] = useState(0);
@@ -114,11 +158,14 @@ export default function ClientDashboardPage() {
   const [sideFile, setSideFile] = useState<File | null>(null);
   const [submittingMilestone, setSubmittingMilestone] = useState(false);
 
-  // Companion widget state — only populated if companion feature is enabled.
+  // Companion widget state â€” only populated if companion feature is enabled.
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
   const [companionEnabled, setCompanionEnabled] = useState(false);
 
   const today = useMemo(() => todayStr(), []);
+  const weekStart = useMemo(() => getMondayOf(today), [today]);
+
+const [showTour, setShowTour] = useState(false);
 
   const completedExercises = useMemo(() => {
     return dayExercises.filter((exercise) => {
@@ -222,6 +269,10 @@ export default function ClientDashboardPage() {
 
     setClient(clientData);
 
+    // Show the tour for clients who haven't seen it yet.
+if (!clientData.tour_completed_at) {
+  setShowTour(true);
+}
     await checkStreakReminders(clientData.id);
 
     const { data: trackingData } = await supabase
@@ -291,15 +342,25 @@ export default function ClientDashboardPage() {
         .order("sort_order", { ascending: true });
 
       if (!daysError && daysData && daysData.length > 0) {
-        const firstIncompleteDay =
-          daysData.find((day) => !day.completed) ?? daysData[0];
+        setProgramDays(daysData);
+        const { data: completionData } = await supabase
+          .from("client_workout_completions")
+          .select("*")
+          .eq("client_id", clientData.id)
+          .eq("client_program_id", program.id);
 
-        setCurrentDay(firstIncompleteDay);
+        const completions = completionData ?? [];
+        setWorkoutCompletions(completions);
+
+        const nextWorkoutDay =
+          getNextWorkoutDay(daysData, completions) ?? daysData[0];
+
+        setCurrentDay(nextWorkoutDay);
 
         const { data: exerciseData, error: exerciseError } = await supabase
           .from("client_program_day_exercises")
           .select("id, client_program_day_id, sets")
-          .eq("client_program_day_id", firstIncompleteDay.id)
+          .eq("client_program_day_id", nextWorkoutDay.id)
           .order("sort_order", { ascending: true });
 
         if (!exerciseError && exerciseData) {
@@ -308,12 +369,14 @@ export default function ClientDashboardPage() {
           const exerciseIds = exerciseData.map((e) => e.id);
 
           if (exerciseIds.length > 0) {
-            const { data: setLogData, error: setLogError } = await supabase
-              .from("client_program_set_logs")
-              .select("id, client_program_day_exercise_id, completed")
-              .eq("client_id", clientData.id)
-              .eq("client_program_day_id", firstIncompleteDay.id)
-              .in("client_program_day_exercise_id", exerciseIds);
+const { data: setLogData, error: setLogError } = await supabase
+  .from("client_program_set_logs")
+  .select("id, client_program_day_exercise_id, completed")
+  .eq("client_id", clientData.id)
+  .eq("client_program_day_id", nextWorkoutDay.id)
+  .eq("log_date", today)
+  .in("client_program_day_exercise_id", exerciseIds)
+  ;
 
             setSetLogs(!setLogError && setLogData ? setLogData : []);
           } else {
@@ -325,11 +388,15 @@ export default function ClientDashboardPage() {
         }
       } else {
         setCurrentDay(null);
+        setProgramDays([]);
+        setWorkoutCompletions([]);
         setDayExercises([]);
         setSetLogs([]);
       }
     } else {
       setCurrentDay(null);
+      setProgramDays([]);
+      setWorkoutCompletions([]);
       setDayExercises([]);
       setSetLogs([]);
     }
@@ -493,7 +560,7 @@ const handleSaveSteps = async () => {
 if (newWaterStatus) {
   await updateStreak(client.id, "water", today);
 
-  // Award Bond XP — only fires on false→true transition (we're inside the
+  // Award Bond XP â€” only fires on falseâ†’true transition (we're inside the
   // newWaterStatus block, so this is the moment of crossing). Self-disabling
   // if companions aren't enabled for this client.
   await awardBondXp(
@@ -610,7 +677,21 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
   useEffect(() => {
     loadDashboard();
   }, [today]);
+useEffect(() => {
+  const handleVisibility = () => {
+    if (document.visibilityState === "visible") {
+      loadDashboard();
+    }
+  };
 
+  document.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("focus", handleVisibility);
+
+  return () => {
+    document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener("focus", handleVisibility);
+  };
+}, [today]);
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.replace("/login");
@@ -638,12 +719,31 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
               </h2>
               <p className={`mt-2 ${styles.body}`}>Here's your progress for today.</p>
 
-              {clientProgram?.current_week && clientProgram.current_week > 0 && (
-                <p className="mt-2 text-sm text-ink-muted">
-                  You're currently in Week {clientProgram.current_week}
-                </p>
+{(clientProgram?.current_week ?? 0) > 0 && (
+                    <p className="mt-2 text-sm text-ink-muted">
+You're currently in Week {clientProgram?.current_week}                </p>
               )}
             </div>
+
+            <ClientUnreadRepliesBanner clientId={client.id} />
+
+            <ThisWeekWorkouts
+              days={programDays}
+              completions={workoutCompletions.filter(
+                (completion) => completion.completed_date >= weekStart
+              )}
+              currentDayId={currentDay?.id ?? null}
+              weekStart={weekStart}
+            />
+
+            <WeeklyCheckInCard clientId={client.id} weekStart={weekStart} />
+
+            <MessageTrainerBox
+              clientId={client.id}
+              contextType="general"
+              contextLabel="General check-in"
+              placeholder="Ask a question or leave your trainer a quick update..."
+            />
 
             <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
               <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
@@ -756,7 +856,7 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
                       {togglingWater
                         ? "..."
                         : dailyTracking?.water_completed
-                        ? "✓ Complete"
+                        ? "âœ“ Complete"
                         : "Mark Complete"}
                     </button>
                   </div>
@@ -787,11 +887,11 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
               </div>
 
               <p className="mt-2 text-sm text-ink-muted">
-                View graphs, measurements, and photos
+                View graphs, measurements and photos
               </p>
             </Link>
 
-            {/* Companion widget — only renders if companion feature is enabled for this client */}
+            {/* Companion widget â€” only renders if companion feature is enabled for this client */}
             {companionEnabled && (
               <Link
                 href="/client/companion"
@@ -855,14 +955,14 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
               </Link>
             )}
 
-            {/* StreakDisplay hidden for launch — kept rendered=false so the underlying
+            {/* StreakDisplay hidden for launch â€” kept rendered=false so the underlying
                 streak mechanic still records data in the background. Re-enable by
                 uncommenting the import and the line below. */}
             {/* <div className="min-w-0">
               <StreakDisplay clientId={client.id} />
             </div> */}
 
-            {/* Leaderboard removed for launch — competitive mechanics deferred.
+            {/* Leaderboard removed for launch â€” competitive mechanics deferred.
                 Component file remains in /components for future use. */}
           </div>
         )}
@@ -1010,6 +1110,17 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
           </div>
         </div>
       )}
+      {showTour && client && (
+  <TourModal
+    clientId={client.id}
+    onComplete={() => {
+      setShowTour(false);
+      setClient({ ...client, tour_completed_at: new Date().toISOString() });
+    }}
+  />
+)}
     </>
   );
 }
+
+
