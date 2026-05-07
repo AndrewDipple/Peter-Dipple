@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-
+import {
+  getActiveCompanionView,
+  isCompanionEnabledForClient,
+  type ActiveCompanionView,
+} from "@/lib/companions";
+import { splitRecipeProTips } from "@/lib/recipeTips";
 
 type Recipe = {
   id: string;
@@ -40,6 +45,7 @@ export default function ClientRecipeDetailPage({ params }: PageProps) {
   const [quantity, setQuantity] = useState("1");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -64,6 +70,11 @@ export default function ClientRecipeDetailPage({ params }: PageProps) {
 
       if (clientData) {
         setClient(clientData);
+
+        const companionEnabled = await isCompanionEnabledForClient(clientData.id);
+        setCompanionView(
+          companionEnabled ? await getActiveCompanionView(clientData.id) : null
+        );
 
         const { data: existingLog } = await supabase
           .from("meal_logs")
@@ -179,6 +190,14 @@ export default function ClientRecipeDetailPage({ params }: PageProps) {
     recipe?.calories && quantity !== ""
       ? recipe.calories * Math.max(1, Number(quantity))
       : recipe?.calories ?? 0;
+  const { instructionsWithoutTips, proTips } = splitRecipeProTips(
+    recipe?.instructions
+  );
+  const companionDisplayName = companionView
+    ? companionView.companion.custom_name ??
+      companionView.path.default_name ??
+      companionView.path.name
+    : null;
 
 return (
     <>
@@ -216,7 +235,7 @@ return (
           <div className={styles.card}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="flex-1">
-                <h3 className="font-semibold text-ink">Today's Meal Log</h3>
+                <h3 className="font-semibold text-ink">Today&apos;s Meal Log</h3>
                 <p className="text-sm text-ink-muted">{today}</p>
 
                 <div className="mt-3">
@@ -267,9 +286,51 @@ return (
           <div>
             <h3 className="font-semibold text-ink">Instructions</h3>
             <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-surface-sunken p-4 text-sm text-ink">
-              {recipe.instructions || "No instructions"}
+              {instructionsWithoutTips || "No instructions"}
             </pre>
           </div>
+
+          {proTips.length > 0 && (
+            <div className={`${styles.card} border border-emerald/30 bg-emerald/5`}>
+              <div className="flex items-start gap-3">
+                {companionView?.currentForm.image_url ? (
+                  <img
+                    src={companionView.currentForm.image_url}
+                    alt={companionView.currentForm.name}
+                    className="h-12 w-12 shrink-0 rounded-lg border border-emerald/30 object-cover"
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-emerald/30 bg-surface-raised text-sm font-semibold text-emerald">
+                    PT
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-ink">
+                    {companionDisplayName
+                      ? `${companionDisplayName}'s cooking note`
+                      : "Peter's cooking note"}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Worth knowing before you cook this.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {proTips.map((tip, index) => (
+                      <div
+                        key={`${tip.title}-${index}`}
+                        className="rounded-md border border-emerald/20 bg-surface-raised px-3 py-2"
+                      >
+                        <p className="text-sm font-semibold text-ink">{tip.title}</p>
+                        {tip.body && (
+                          <p className="mt-1 text-sm text-ink-muted">{tip.body}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>

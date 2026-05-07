@@ -21,7 +21,7 @@ import {
 } from "@/lib/companions";
 // import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch â€” see commit notes.
 // import Leaderboard from "@/components/Leaderboard";     // Removed for launch â€” competitive mechanics deferred.
-import { Sparkles } from "lucide-react";
+import { CalendarClock, Sparkles } from "lucide-react";
 
 type Client = {
   id: string;
@@ -109,6 +109,18 @@ type ClientMilestone = {
   photo_log_date: string | null;
 };
 
+type PtSessionRequest = {
+  id: string;
+  client_id: string;
+  preferred_start_at: string;
+  client_note: string | null;
+  status: "requested" | "confirmed" | "alternative_suggested" | "cancelled" | "declined";
+  trainer_response: string | null;
+  proposed_start_at: string | null;
+  confirmed_start_at: string | null;
+  created_at: string;
+};
+
 const getNextWorkoutDay = (
   days: ClientProgramDay[],
   completions: ClientWorkoutCompletion[]
@@ -167,9 +179,29 @@ export default function ClientDashboardPage() {
   // Companion widget state â€” only populated if companion feature is enabled.
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
   const [companionEnabled, setCompanionEnabled] = useState(false);
+  const [ptRequests, setPtRequests] = useState<PtSessionRequest[]>([]);
+  const [preferredPtDateTime, setPreferredPtDateTime] = useState("");
+  const [ptRequestNote, setPtRequestNote] = useState("");
+  const [submittingPtRequest, setSubmittingPtRequest] = useState(false);
 
-  const today = useMemo(() => todayStr(), []);
+const today = useMemo(() => todayStr(), []);
   const weekStart = useMemo(() => getMondayOf(today), [today]);
+  const companionDisplayName = companionView
+    ? companionView.companion.custom_name ??
+      companionView.path.default_name ??
+      companionView.path.name
+    : null;
+
+  const formatSessionDateTime = (value: string | null | undefined) => {
+    if (!value) return "-";
+    return new Date(value).toLocaleString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
 const [showTour, setShowTour] = useState(false);
 
@@ -448,6 +480,15 @@ const { data: setLogData, error: setLogError } = await supabase
 
     setTodayCalories(recipeCaloriesTotal + customCaloriesTotal);
 
+    const { data: ptRequestData } = await supabase
+      .from("pt_session_requests")
+      .select("*")
+      .eq("client_id", clientData.id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    setPtRequests((ptRequestData ?? []) as PtSessionRequest[]);
+
     // --- Companion (only if feature enabled for this client) ---
     const isEnabled = await isCompanionEnabledForClient(clientData.id);
     setCompanionEnabled(isEnabled);
@@ -527,7 +568,37 @@ const handleSaveSteps = async () => {
   setSavingSteps(false);
 };
 
-  const handleToggleWater = async () => {
+  const handleSubmitPtRequest = async () => {
+    if (!client || !preferredPtDateTime) {
+      alert("Please choose a preferred date and time.");
+      return;
+    }
+
+    setSubmittingPtRequest(true);
+
+    const { data, error } = await supabase
+      .from("pt_session_requests")
+      .insert({
+        client_id: client.id,
+        preferred_start_at: new Date(preferredPtDateTime).toISOString(),
+        client_note: ptRequestNote.trim() || null,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Could not send PT request. Please try again.");
+      setSubmittingPtRequest(false);
+      return;
+    }
+
+    setPtRequests((prev) => [data as PtSessionRequest, ...prev]);
+    setPreferredPtDateTime("");
+    setPtRequestNote("");
+    setSubmittingPtRequest(false);
+  };
+
+const handleToggleWater = async () => {
     if (!client) return;
 
     setTogglingWater(true);
@@ -725,11 +796,11 @@ useEffect(() => {
               <h2 className={`break-words text-2xl font-semibold ${styles.goldText}`}>
                 Welcome, {client.full_name}
               </h2>
-              <p className={`mt-2 ${styles.body}`}>Here's your progress for today.</p>
+              <p className={`mt-2 ${styles.body}`}>Here&apos;s your progress for today.</p>
 
 {(clientProgram?.current_week ?? 0) > 0 && (
                     <p className="mt-2 text-sm text-ink-muted">
-You're currently in Week {clientProgram?.current_week}                </p>
+You&apos;re currently in Week {clientProgram?.current_week}                </p>
               )}
             </div>
 
@@ -758,10 +829,98 @@ You're currently in Week {clientProgram?.current_week}                </p>
               showRecentMessages={false}
             />
 
+            <div className={styles.card}>
+              <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-gold/10 p-2 text-gold">
+                  <CalendarClock size={20} />
+                </div>
+                <div>
+                  <h2 className={styles.h2}>Request online PT</h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Send Peter a preferred date and time. He can confirm it or
+                    suggest an alternative.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] md:items-end">
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Preferred date and time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={preferredPtDateTime}
+                    onChange={(event) => setPreferredPtDateTime(event.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Notes
+                  </label>
+                  <input
+                    value={ptRequestNote}
+                    onChange={(event) => setPtRequestNote(event.target.value)}
+                    className={styles.input}
+                    placeholder="Anything Peter should know?"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSubmitPtRequest}
+                  disabled={submittingPtRequest}
+                  className={styles.buttonPrimary}
+                >
+                  {submittingPtRequest ? "Sending..." : "Send request"}
+                </button>
+              </div>
+
+              {ptRequests.length > 0 && (
+                <div className="mt-5 space-y-2">
+                  <p className="text-sm font-semibold text-ink">Recent requests</p>
+                  {ptRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="rounded-md border border-border-subtle bg-surface-sunken p-3"
+                    >
+                      <div>
+                        <div>
+                          <p className="text-sm font-medium text-ink">
+                            Preferred: {formatSessionDateTime(request.preferred_start_at)}
+                          </p>
+                          <p className="mt-1 text-xs text-ink-muted">
+                            Status: {request.status.replaceAll("_", " ")}
+                          </p>
+                          {request.status === "confirmed" && (
+                            <p className="mt-1 text-sm text-emerald">
+                              Confirmed for {formatSessionDateTime(request.confirmed_start_at)}
+                            </p>
+                          )}
+                          {request.status === "alternative_suggested" && (
+                            <p className="mt-1 text-sm text-gold">
+                              Alternative suggested: {formatSessionDateTime(request.proposed_start_at)}
+                            </p>
+                          )}
+                          {request.trainer_response && (
+                            <p className="mt-1 text-sm text-ink-muted">
+                              Peter: {request.trainer_response}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
               <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
                 <Link href="/client/workout" className="block min-w-0">
-                  <p className="text-sm text-ink-muted">Today's Workout</p>
+                  <p className="text-sm text-ink-muted">Today&apos;s Workout</p>
                   <p className="mt-1 break-words text-lg font-semibold text-ink">
                     {currentDay?.day_name || "No active programme day"}
                   </p>
@@ -771,7 +930,7 @@ You're currently in Week {clientProgram?.current_week}                </p>
                 </Link>
 
                 <div className="mt-4 border-t border-border-subtle pt-4">
-                  <p className="text-sm font-medium text-ink">Today's Steps</p>
+                  <p className="text-sm font-medium text-ink">Today&apos;s Steps</p>
 
                   <div className="mt-2 flex w-full min-w-0 flex-wrap items-center gap-2">
                     <input
@@ -993,6 +1152,31 @@ You're currently in Week {clientProgram?.current_week}                </p>
               <p className="mt-1 text-sm text-ink-muted">
                 Complete this milestone to continue your program
               </p>
+            </div>
+
+            <div className="mt-4 flex items-start gap-3 rounded-md border border-emerald/20 bg-emerald/5 p-3">
+              {companionView?.currentForm.image_url ? (
+                <img
+                  src={companionView.currentForm.image_url}
+                  alt={companionView.currentForm.name}
+                  className="h-10 w-10 shrink-0 rounded-md border border-emerald/30 object-cover"
+                />
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-emerald/30 bg-surface-raised text-xs font-semibold text-emerald">
+                  PT
+                </div>
+              )}
+
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink">
+                  {companionDisplayName
+                    ? `${companionDisplayName}'s milestone note`
+                    : "Milestone note"}
+                </p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  This gives Peter a clearer picture of how your programme is landing.
+                </p>
+              </div>
             </div>
 
             <div className="mt-6 space-y-6">

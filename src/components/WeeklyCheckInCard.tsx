@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { formatWeekLabel } from "@/lib/dates";
+import {
+  awardBondXp,
+  getActiveCompanionView,
+  isCompanionEnabledForClient,
+  type ActiveCompanionView,
+} from "@/lib/companions";
 import { X } from "lucide-react";
 
 type WeeklyCheckInCardProps = {
@@ -43,6 +49,7 @@ export default function WeeklyCheckInCard({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
 
   useEffect(() => {
     const loadCheckIn = async () => {
@@ -60,6 +67,27 @@ export default function WeeklyCheckInCard({
 
     loadCheckIn();
   }, [clientId, weekStart]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCompanion = async () => {
+      const companionEnabled = await isCompanionEnabledForClient(clientId);
+      const activeCompanion = companionEnabled
+        ? await getActiveCompanionView(clientId)
+        : null;
+
+      if (!cancelled) {
+        setCompanionView(activeCompanion);
+      }
+    };
+
+    loadCompanion();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
 
   const handleSubmit = async () => {
     setSaving(true);
@@ -86,10 +114,22 @@ export default function WeeklyCheckInCard({
     }
 
     setCompleted(true);
+    await awardBondXp(
+      clientId,
+      25,
+      `weekly_check_in_${weekStart}`,
+      "Submitted weekly check-in"
+    );
     setSaving(false);
   };
 
   if (loading || completed || dismissed) return null;
+
+  const companionDisplayName = companionView
+    ? companionView.companion.custom_name ??
+      companionView.path.default_name ??
+      companionView.path.name
+    : null;
 
   const content = (
     <div className={styles.card}>
@@ -111,6 +151,31 @@ export default function WeeklyCheckInCard({
             <X size={18} />
           </button>
         )}
+      </div>
+
+      <div className="mt-4 flex items-start gap-3 rounded-md border border-emerald/20 bg-emerald/5 p-3">
+        {companionView?.currentForm.image_url ? (
+          <img
+            src={companionView.currentForm.image_url}
+            alt={companionView.currentForm.name}
+            className="h-10 w-10 shrink-0 rounded-md border border-emerald/30 object-cover"
+          />
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-emerald/30 bg-surface-raised text-xs font-semibold text-emerald">
+            PT
+          </div>
+        )}
+
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">
+            {companionDisplayName
+              ? `${companionDisplayName}'s check-in note`
+              : "Check-in note"}
+          </p>
+          <p className="mt-1 text-sm text-ink-muted">
+            Short and honest is perfect. Peter can use this to adjust your week.
+          </p>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-5">

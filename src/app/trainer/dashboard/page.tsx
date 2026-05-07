@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { styles } from "@/lib/design";
 import { supabase } from "@/lib/supabase";
 import { getMondayOf } from "@/lib/dates";
+import { CalendarClock } from "lucide-react";
 
 type Client = {
   id: string;
@@ -61,6 +62,19 @@ type WeeklyCheckIn = {
   client_id: string;
   week_start: string;
 };
+
+type PtSessionRequest = {
+  id: string;
+  client_id: string;
+  preferred_start_at: string;
+  client_note: string | null;
+  status: "requested" | "confirmed" | "alternative_suggested" | "cancelled" | "declined";
+  trainer_response: string | null;
+  proposed_start_at: string | null;
+  confirmed_start_at: string | null;
+  created_at: string;
+  client_name: string;
+};
 type ClientStatusCard = {
   client: Client;
   workout: {
@@ -96,6 +110,11 @@ export default function TrainerDashboardPage() {
   const [clientCards, setClientCards] = useState<ClientStatusCard[]>([]);
   const [unreadMessages, setUnreadMessages] = useState<UnreadClientMessage[]>([]);
   const [weeklyCheckIns, setWeeklyCheckIns] = useState<WeeklyCheckIn[]>([]);
+  const [ptRequests, setPtRequests] = useState<PtSessionRequest[]>([]);
+  const [ptResponseValues, setPtResponseValues] = useState<
+    Record<string, { proposedStart: string; response: string }>
+  >({});
+  const [updatingPtRequestId, setUpdatingPtRequestId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const selectedWeekStart = useMemo(() => getMondayOf(selectedDate), [selectedDate]);
@@ -136,6 +155,17 @@ export default function TrainerDashboardPage() {
     if (days <= 3) return "text-green-600";
     if (days <= 7) return "text-amber-600";
     return "text-red-600"; // 8+ days
+  };
+
+  const formatSessionDateTime = (value: string | null | undefined) => {
+    if (!value) return "-";
+    return new Date(value).toLocaleString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
   const attentionItems = useMemo(() => {
@@ -298,9 +328,38 @@ export default function TrainerDashboardPage() {
           .eq("week_start", selectedWeekStart);
 
         setWeeklyCheckIns((checkInData ?? []) as WeeklyCheckIn[]);
+
+        const { data: ptRequestData } = await supabase
+          .from("pt_session_requests")
+          .select("*")
+          .in("client_id", clientIds)
+          .in("status", ["requested", "alternative_suggested"])
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        const requests = ((ptRequestData ?? []) as PtSessionRequest[]).map(
+          (request) => ({
+            ...request,
+            client_name: clientNameMap.get(request.client_id) ?? "Client",
+          })
+        );
+
+        setPtRequests(requests);
+        setPtResponseValues(
+          Object.fromEntries(
+            requests.map((request) => [
+              request.id,
+              {
+                proposedStart: "",
+                response: request.trainer_response ?? "",
+              },
+            ])
+          )
+        );
       } else {
         setUnreadMessages([]);
         setWeeklyCheckIns([]);
+        setPtRequests([]);
       }
 
       const exerciseIds = Array.from(
@@ -432,6 +491,74 @@ export default function TrainerDashboardPage() {
     loadDashboard();
   }, [selectedDate]);
 
+  const updatePtRequest = async (
+    request: PtSessionRequest,
+    action: "confirm" | "suggest" | "decline"
+  ) => {
+    const values = ptResponseValues[request.id] ?? {
+      proposedStart: "",
+      response: "",
+    };
+
+    if (action === "suggest" && !values.proposedStart) {
+      alert("Please choose an alternative date and time.");
+      return;
+    }
+
+    setUpdatingPtRequestId(request.id);
+
+    const now = new Date().toISOString();
+    const payload =
+      action === "confirm"
+        ? {
+            status: "confirmed",
+            confirmed_start_at: request.preferred_start_at,
+            trainer_response: values.response.trim() || null,
+            responded_at: now,
+            updated_at: now,
+          }
+        : action === "suggest"
+          ? {
+              status: "alternative_suggested",
+              proposed_start_at: new Date(values.proposedStart).toISOString(),
+              trainer_response:
+                values.response.trim() ||
+                "Peter has suggested an alternative time.",
+              responded_at: now,
+              updated_at: now,
+            }
+          : {
+              status: "declined",
+              trainer_response: values.response.trim() || null,
+              responded_at: now,
+              updated_at: now,
+            };
+
+    const { data, error } = await supabase
+      .from("pt_session_requests")
+      .update(payload)
+      .eq("id", request.id)
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Could not update PT request.");
+      setUpdatingPtRequestId(null);
+      return;
+    }
+
+    setPtRequests((prev) =>
+      action === "confirm" || action === "decline"
+        ? prev.filter((item) => item.id !== request.id)
+        : prev.map((item) =>
+            item.id === request.id
+              ? { ...(data as PtSessionRequest), client_name: request.client_name }
+              : item
+          )
+    );
+    setUpdatingPtRequestId(null);
+  };
+
   return (
     <>
       <h1 className={styles.display}>Trainer Dashboard</h1>
@@ -507,6 +634,127 @@ export default function TrainerDashboardPage() {
           </div>
         </div>
       )}
+
+      {!loading && ptRequests.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gold/40 bg-gold/10 p-5 shadow-subtle">
+          <div className="flex items-start gap-3">
+            <div className="rounded-lg bg-surface-raised p-2 text-gold">
+              <CalendarClock size={20} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-ink-muted">
+                Online PT requests
+              </p>
+              <h2 className="mt-1 text-xl font-semibold text-ink">
+                {ptRequests.length} request{ptRequests.length === 1 ? "" : "s"} to review
+              </h2>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {ptRequests.map((request) => {
+              const values = ptResponseValues[request.id] ?? {
+                proposedStart: "",
+                response: "",
+              };
+
+              return (
+                <div
+                  key={request.id}
+                  className="rounded-lg border border-border-subtle bg-surface-raised p-4"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="font-semibold text-ink">{request.client_name}</p>
+                      <p className="mt-1 text-sm text-ink-muted">
+                        Preferred: {formatSessionDateTime(request.preferred_start_at)}
+                      </p>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Status: {request.status.replaceAll("_", " ")}
+                      </p>
+                      {request.client_note && (
+                        <p className="mt-2 text-sm text-ink-muted">
+                          Client note: {request.client_note}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => updatePtRequest(request, "confirm")}
+                      disabled={updatingPtRequestId === request.id}
+                      className={styles.buttonPrimary}
+                    >
+                      Confirm preferred
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto_auto] md:items-end">
+                    <div>
+                      <label className="text-sm font-medium text-ink">
+                        Alternative time
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={values.proposedStart}
+                        onChange={(event) =>
+                          setPtResponseValues((prev) => ({
+                            ...prev,
+                            [request.id]: {
+                              ...values,
+                              proposedStart: event.target.value,
+                            },
+                          }))
+                        }
+                        className={styles.input}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-ink">
+                        Response
+                      </label>
+                      <input
+                        value={values.response}
+                        onChange={(event) =>
+                          setPtResponseValues((prev) => ({
+                            ...prev,
+                            [request.id]: {
+                              ...values,
+                              response: event.target.value,
+                            },
+                          }))
+                        }
+                        placeholder="Optional message"
+                        className={styles.input}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => updatePtRequest(request, "suggest")}
+                      disabled={updatingPtRequestId === request.id}
+                      className={styles.buttonSecondary}
+                    >
+                      Suggest time
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => updatePtRequest(request, "decline")}
+                      disabled={updatingPtRequestId === request.id}
+                      className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <p className={styles.body}>Loading dashboard...</p>
       ) : clientCards.length === 0 ? (

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { todayStr } from "@/lib/dates";
+import { getMondayOf, todayStr } from "@/lib/dates";
 import { updateStreak } from "@/lib/streaks";
 import {
   isCompanionEnabledForClient,
@@ -15,6 +15,7 @@ import AchievementCelebration from "@/components/AchievementCelebration";
 import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
+import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
 import {
   createOfflineId,
@@ -187,6 +188,7 @@ export default function ClientWorkoutPage() {
   const lastLineRef = useRef<string | null>(null);
 
   const today = useMemo(() => todayStr(), []);
+  const weekStart = useMemo(() => getMondayOf(today), [today]);
 
   const refreshOfflineQueueCount = () => {
     setOfflineQueueCount(getOfflineWorkoutQueueCount());
@@ -1533,8 +1535,23 @@ export default function ClientWorkoutPage() {
         </p>
       ) : (
         <div className="mt-6 space-y-6">
+          <ThisWeekWorkouts
+            days={programDays}
+            completions={workoutCompletions.filter(
+              (completion) => completion.completed_date >= weekStart
+            )}
+            currentDayId={getNextWorkoutDay(programDays, workoutCompletions)?.id ?? null}
+            selectedDayId={selectedDayId}
+            weekStart={weekStart}
+            onSelectDay={(dayId) => {
+              setSelectedDayId(dayId);
+              setShowVideo(false);
+            }}
+            showOpenWorkoutLink={false}
+          />
+
           <div className={styles.card}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div>
               <div>
                 <h2 className={styles.h2}>
                   {currentDay.day_name || "Workout Day"}
@@ -1549,31 +1566,6 @@ export default function ClientWorkoutPage() {
                     Week {clientProgram.current_week}
                   </p>
                 )}
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-ink">
-                  Change workout day
-                </label>
-
-                <select
-                  value={selectedDayId}
-                  onChange={(e) => setSelectedDayId(e.target.value)}
-                  className={styles.input}
-                >
-                  {programDays.map((day) => (
-                    <option key={day.id} value={day.id}>
-                      {day.day_name || "Workout Day"}
-                      {workoutCompletions.some(
-                        (completion) =>
-                          completion.client_program_day_id === day.id &&
-                          completion.completed_date === today
-                      )
-                        ? " - done today"
-                        : ""}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
 

@@ -1,27 +1,27 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import {
-  getActiveCompanionView,
-  listAvailablePaths,
+  awardBondXp,
   chooseCompanion,
-  renameCompanion,
   deactivateCompanion,
+  findClientCompanionForPath,
+  getActiveCompanionView,
   getRandomLine,
   getRecentCompanionEvents,
   isCompanionEnabledForClient,
-  findClientCompanionForPath,
-    awardBondXp, // ← add this
-
+  listAvailablePaths,
+  listCompanionCollection,
+  renameCompanion,
   type ActiveCompanionView,
-  type CompanionPath,
+  type CompanionCollectionItem,
   type CompanionEvent,
+  type CompanionPath,
 } from "@/lib/companions";
-import { ArrowLeft, Sparkles, Edit2, Check, X, Power } from "lucide-react";
+import { ArrowLeft, Check, Edit2, Lock, Power, Sparkles, X } from "lucide-react";
 
 export default function CompanionPage() {
   const router = useRouter();
@@ -30,16 +30,15 @@ export default function CompanionPage() {
   const [enabled, setEnabled] = useState(false);
   const [view, setView] = useState<ActiveCompanionView | null>(null);
   const [availablePaths, setAvailablePaths] = useState<CompanionPath[]>([]);
+  const [collection, setCollection] = useState<CompanionCollectionItem[]>([]);
   const [recentEvents, setRecentEvents] = useState<CompanionEvent[]>([]);
   const [line, setLine] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Choose flow state
   const [choosingPathId, setChoosingPathId] = useState<string | null>(null);
   const [chosenName, setChosenName] = useState("");
   const [activating, setActivating] = useState(false);
 
-  // Rename state
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -47,7 +46,10 @@ export default function CompanionPage() {
   const loadPage = useCallback(async () => {
     setLoading(true);
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) {
       router.replace("/login");
       return;
@@ -66,7 +68,6 @@ export default function CompanionPage() {
 
     setClientId(clientData.id);
 
-    // Feature flag check — if disabled, kick them back to nutrition.
     const isEnabled = await isCompanionEnabledForClient(clientData.id);
     setEnabled(isEnabled);
     if (!isEnabled) {
@@ -74,20 +75,20 @@ export default function CompanionPage() {
       return;
     }
 
-    // Load active companion (if any) and available paths in parallel.
-    const [v, paths] = await Promise.all([
+    const [activeView, paths, collectionItems] = await Promise.all([
       getActiveCompanionView(clientData.id),
       listAvailablePaths(),
+      listCompanionCollection(clientData.id),
     ]);
 
-    setView(v);
+    setView(activeView);
     setAvailablePaths(paths);
+    setCollection(collectionItems);
 
-    // If we have an active companion, fetch a dialogue line and recent events.
-    if (v) {
+    if (activeView) {
       const [randomLine, events] = await Promise.all([
-        getRandomLine(v.path.slug, "general"),
-        getRecentCompanionEvents(v.companion.id, 5),
+        getRandomLine(activeView.path.slug, "general"),
+        getRecentCompanionEvents(activeView.companion.id, 5),
       ]);
       setLine(randomLine);
       setRecentEvents(events);
@@ -100,88 +101,74 @@ export default function CompanionPage() {
   }, [router]);
 
   useEffect(() => {
-    loadPage();
+    const timeoutId = window.setTimeout(() => {
+      loadPage();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadPage]);
 
-  // --- Choose-companion flow ---
+  const startChoosing = async (pathId: string) => {
+    if (!clientId) return;
 
-const startChoosing = async (pathId: string) => {
-  if (!clientId) return;
+    const collectionItem = collection.find((item) => item.path.id === pathId);
+    if (collectionItem && !collectionItem.isUnlocked) {
+      alert(collectionItem.unlockLabel ?? "This companion is still locked.");
+      return;
+    }
 
-  const path = availablePaths.find((p) => p.id === pathId);
-  setChoosingPathId(pathId);
+    const path = availablePaths.find((availablePath) => availablePath.id === pathId);
+    setChoosingPathId(pathId);
 
-  // If they've had this companion before, pre-fill their previous name.
-  const existing = await findClientCompanionForPath(clientId, pathId);
-  if (existing?.custom_name) {
-    setChosenName(existing.custom_name);
-  } else {
-    setChosenName(path?.default_name ?? "");
-  }
-};
-
-const confirmChoice = async () => {
-  if (!clientId || !choosingPathId) return;
-  setActivating(true);
-
-  // Check if this is the first time the user has ever chosen this path.
-  // We award XP only on first-ever choice, not on re-activation.
-  const existingForPath = await findClientCompanionForPath(clientId, choosingPathId);
-  const isFirstChoice = !existingForPath;
-
-  // Check if a custom name was provided (and isn't just the default).
-  const path = availablePaths.find((p) => p.id === choosingPathId);
-  const trimmedName = chosenName.trim();
-  const hasCustomName =
-    trimmedName.length > 0 &&
-    trimmedName !== (path?.default_name ?? "");
-
-  // Whether to award the naming XP — only on first choice with a custom name.
-  const isFirstNaming = isFirstChoice && hasCustomName;
-
-  const result = await chooseCompanion(
-    clientId,
-    choosingPathId,
-    trimmedName || null
-  );
-
-  if (!result) {
-    alert("Could not activate companion.");
-    setActivating(false);
-    return;
-  }
-
-  // Award XP after the companion exists, so awardBondXp can find it as the active companion.
-  if (isFirstChoice) {
-    await awardBondXp(
-      clientId,
-      100,
-      "chose_companion",
-      `Chose ${path?.name ?? "a companion"}`
-    );
-  }
-
-  if (isFirstNaming) {
-    await awardBondXp(
-      clientId,
-      50,
-      "named_companion",
-      `Named your companion "${trimmedName}"`
-    );
-  }
-
-  setActivating(false);
-  setChoosingPathId(null);
-  setChosenName("");
-  await loadPage();
-};
-
-  const cancelChoice = () => {
-    setChoosingPathId(null);
-    setChosenName("");
+    const existing = await findClientCompanionForPath(clientId, pathId);
+    setChosenName(existing?.custom_name ?? path?.default_name ?? "");
   };
 
-  // --- Rename flow ---
+  const confirmChoice = async () => {
+    if (!clientId || !choosingPathId) return;
+    setActivating(true);
+
+    const existingForPath = await findClientCompanionForPath(clientId, choosingPathId);
+    const isFirstChoice = !existingForPath;
+    const path = availablePaths.find((availablePath) => availablePath.id === choosingPathId);
+    const trimmedName = chosenName.trim();
+    const companionName = trimmedName || path?.default_name || path?.name || "companion";
+
+    const result = await chooseCompanion(
+      clientId,
+      choosingPathId,
+      trimmedName || null
+    );
+
+    if (!result) {
+      alert("Could not activate companion.");
+      setActivating(false);
+      return;
+    }
+
+    if (isFirstChoice) {
+      await awardBondXp(
+        clientId,
+        100,
+        "chose_companion",
+        `Chose ${path?.name ?? "a companion"}`
+      );
+    }
+
+    if (isFirstChoice) {
+      await awardBondXp(
+        clientId,
+        50,
+        "named_companion",
+        `Named your companion "${companionName}"`
+      );
+    }
+
+    setActivating(false);
+    setChoosingPathId(null);
+    setChosenName("");
+    await loadPage();
+  };
 
   const startRename = () => {
     setRenameValue(view?.companion.custom_name ?? view?.path.default_name ?? "");
@@ -204,18 +191,15 @@ const confirmChoice = async () => {
     await loadPage();
   };
 
-  const cancelRename = () => {
-    setRenaming(false);
-    setRenameValue("");
-  };
-
-  // --- Turn off ---
-
   const handleTurnOff = async () => {
     if (!view) return;
-    if (!window.confirm(
-      "Turn off your companion? Your XP is saved — you can re-activate any time."
-    )) return;
+    if (
+      !window.confirm(
+        "Turn off your companion? Your XP is saved and you can re-activate any time."
+      )
+    ) {
+      return;
+    }
 
     const ok = await deactivateCompanion(view.companion.id);
     if (!ok) {
@@ -226,21 +210,170 @@ const confirmChoice = async () => {
     await loadPage();
   };
 
-  // --- Render ---
+  const activeCompanionName = view
+    ? view.companion.custom_name ?? view.path.default_name ?? view.path.name
+    : null;
+  const starterItems = collection.filter((item) => item.path.is_starter);
+  const lockedItems = collection.filter((item) => !item.isUnlocked);
+
+  const getCompanionTypeLabel = (type: CompanionPath["companion_type"]) => {
+    switch (type) {
+      case "power":
+        return "Power";
+      case "fuel":
+        return "Fuel";
+      case "spirit":
+        return "Spirit";
+      default:
+        return null;
+    }
+  };
+
+  const getCompanionTypeDescription = (type: CompanionPath["companion_type"]) => {
+    switch (type) {
+      case "power":
+        return "Training energy";
+      case "fuel":
+        return "Food, growth, and planning";
+      case "spirit":
+        return "General support and vibes";
+      default:
+        return null;
+    }
+  };
+
+  const renderCompanionCard = (
+    item: CompanionCollectionItem,
+    mode: "starter" | "collection"
+  ) => {
+    const displayName =
+      item.companion?.custom_name ?? item.path.default_name ?? item.path.name;
+    const imageUrl = item.currentForm?.image_url ?? item.previewForm?.image_url;
+    const isCurrent = view?.path.id === item.path.id;
+    const progressLabel =
+      item.target !== null
+        ? `${Math.min(item.progress, item.target)} / ${item.target}`
+        : null;
+    const typeLabel = getCompanionTypeLabel(item.path.companion_type);
+    const typeDescription = getCompanionTypeDescription(item.path.companion_type);
+
+    return (
+      <div
+        key={item.path.id}
+        className={`${styles.card} ${
+          item.isUnlocked ? "" : "border border-border-subtle bg-surface-sunken"
+        }`}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={item.currentForm?.name ?? item.path.name}
+              className="h-20 w-20 shrink-0 rounded-lg border border-border-subtle object-cover"
+            />
+          ) : (
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border border-border-subtle bg-surface-sunken text-2xl">
+              ?
+            </div>
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="break-words text-lg font-semibold text-ink">
+                {displayName}
+              </h3>
+              {isCurrent && (
+                <span className="rounded-full bg-emerald/10 px-2 py-0.5 text-xs font-medium text-emerald">
+                  Active
+                </span>
+              )}
+              {item.isMastered && (
+                <span className="rounded-full bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold">
+                  Mastered
+                </span>
+              )}
+              {!item.isUnlocked && (
+                <span className="flex items-center gap-1 rounded-full bg-surface-raised px-2 py-0.5 text-xs font-medium text-ink-muted">
+                  <Lock size={12} /> Locked
+                </span>
+              )}
+            </div>
+
+            {typeLabel && (
+              <p className="mt-1 text-sm font-medium text-gold">
+                {typeLabel}
+                {typeDescription ? ` - ${typeDescription}` : ""}
+              </p>
+            )}
+
+            {item.path.description && (
+              <p className="mt-1 text-sm text-ink-muted">{item.path.description}</p>
+            )}
+
+            {item.companion && (
+              <p className="mt-2 text-sm text-ink-muted">
+                {item.companion.xp.toLocaleString()} Bond XP
+              </p>
+            )}
+
+            {!item.isUnlocked && (
+              <div className="mt-3">
+                <p className="text-sm text-ink-muted">
+                  {item.unlockLabel ?? "Locked for now"}
+                  {progressLabel ? ` (${progressLabel})` : ""}
+                </p>
+                {item.target !== null && (
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+                    <div
+                      className="h-full rounded-full bg-emerald"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.max(0, (item.progress / item.target) * 100)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {item.isUnlocked && !isCurrent && (
+              <button
+                type="button"
+                onClick={() => startChoosing(item.path.id)}
+                className={`${styles.buttonPrimary} mt-4`}
+              >
+                {item.companion
+                  ? `Switch to ${displayName}`
+                  : mode === "starter"
+                  ? `Choose ${item.path.name}`
+                  : `Unlock ${item.path.name}`}
+              </button>
+            )}
+
+            {isCurrent && mode === "collection" && (
+              <p className="mt-4 text-sm font-medium text-emerald">
+                Currently travelling with you.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (loading) {
     return <p className={`${styles.body} mt-6`}>Loading...</p>;
   }
 
-  if (!enabled) {
-    // Should have redirected; render nothing as a safety.
-    return null;
-  }
+  if (!enabled) return null;
 
   return (
     <>
       <div className="mb-6 flex items-center gap-4">
         <button
+          type="button"
           onClick={() => router.back()}
           className="flex items-center gap-2 text-sm text-ink-muted hover:text-ink"
         >
@@ -250,11 +383,10 @@ const confirmChoice = async () => {
 
       <h1 className={styles.display}>Companion</h1>
 
-      {/* Choose-companion overlay */}
       {choosingPathId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-lifted">
-            <h2 className="text-xl font-semibold text-black">Name Your Companion</h2>
+            <h2 className="text-xl font-semibold text-black">Name your companion</h2>
             <p className="mt-1 text-sm text-gray-600">
               You can rename them later if you change your mind.
             </p>
@@ -262,7 +394,7 @@ const confirmChoice = async () => {
             <input
               type="text"
               value={chosenName}
-              onChange={(e) => setChosenName(e.target.value)}
+              onChange={(event) => setChosenName(event.target.value)}
               autoFocus
               maxLength={30}
               className="mt-4 w-full rounded-md border border-gray-300 px-3 py-2 focus:border-black focus:outline-none"
@@ -271,6 +403,7 @@ const confirmChoice = async () => {
 
             <div className="mt-4 flex gap-2">
               <button
+                type="button"
                 onClick={confirmChoice}
                 disabled={activating}
                 className="flex-1 rounded-md bg-black px-4 py-2.5 font-semibold text-white hover:opacity-90 disabled:opacity-50"
@@ -278,7 +411,11 @@ const confirmChoice = async () => {
                 {activating ? "Activating..." : "Confirm"}
               </button>
               <button
-                onClick={cancelChoice}
+                type="button"
+                onClick={() => {
+                  setChoosingPathId(null);
+                  setChosenName("");
+                }}
                 disabled={activating}
                 className="flex-1 rounded-md border border-gray-300 bg-white px-4 py-2.5 font-medium text-black hover:bg-gray-100"
               >
@@ -290,42 +427,43 @@ const confirmChoice = async () => {
       )}
 
       {!view ? (
-        // ---------- No active companion: show chooser ----------
         <div className="mt-6 space-y-6">
           <div className={`${styles.card} bg-surface-sunken`}>
-            <h2 className={styles.h2}>Choose a Companion</h2>
+            <h2 className={styles.h2}>Choose your first Companion Type</h2>
             <p className="mt-2 text-sm text-ink-muted">
-              A small sidekick that grows alongside you. They earn Bond XP as you
-              engage with the app and the coaching process. Optional and
-              non-judgemental — pick one if it sounds fun, skip if not.
+              Power is for training energy. Fuel is for food, growth, and
+              planning. Spirit is for general support and vibes. Pick one, or
+              carry on without one for now.
             </p>
           </div>
 
-          {availablePaths.length === 0 ? (
-            <p className={styles.body}>No companions are available right now.</p>
+          {starterItems.length === 0 ? (
+            <p className={styles.body}>No starter companions are available right now.</p>
           ) : (
+            <div className="grid gap-3 md:grid-cols-3">
+              {starterItems.map((item) => renderCompanionCard(item, "starter"))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => router.push("/client/dashboard")}
+            className={styles.buttonSecondary}
+          >
+            Continue without a companion
+          </button>
+
+          {lockedItems.length > 0 && (
             <div className="space-y-3">
-              {availablePaths.map((path) => (
-                <div key={path.id} className={styles.card}>
-                  <h3 className="text-lg font-semibold text-ink">{path.name}</h3>
-                  {path.description && (
-                    <p className="mt-1 text-sm text-ink-muted">{path.description}</p>
-                  )}
-                  <button
-                    onClick={() => startChoosing(path.id)}
-                    className={`${styles.buttonPrimary} mt-4`}
-                  >
-                    Choose {path.name}
-                  </button>
-                </div>
-              ))}
+              <h2 className={styles.h2}>Locked companions</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {lockedItems.map((item) => renderCompanionCard(item, "collection"))}
+              </div>
             </div>
           )}
         </div>
       ) : (
-        // ---------- Has active companion: show companion card ----------
         <div className="mt-6 space-y-6">
-          {/* Hero card */}
           <div className={styles.card}>
             <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
               {view.currentForm.image_url ? (
@@ -346,12 +484,13 @@ const confirmChoice = async () => {
                     <input
                       type="text"
                       value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
+                      onChange={(event) => setRenameValue(event.target.value)}
                       maxLength={30}
                       autoFocus
                       className={styles.input}
                     />
                     <button
+                      type="button"
                       onClick={confirmRename}
                       disabled={saving}
                       className="rounded-md border border-emerald p-2 text-emerald hover:bg-emerald hover:text-white"
@@ -360,7 +499,11 @@ const confirmChoice = async () => {
                       <Check size={16} />
                     </button>
                     <button
-                      onClick={cancelRename}
+                      type="button"
+                      onClick={() => {
+                        setRenaming(false);
+                        setRenameValue("");
+                      }}
                       disabled={saving}
                       className="rounded-md border border-border-subtle p-2 text-ink-muted hover:border-red-300 hover:text-red-600"
                       aria-label="Cancel"
@@ -371,9 +514,10 @@ const confirmChoice = async () => {
                 ) : (
                   <div className="flex items-center justify-center gap-2 sm:justify-start">
                     <h2 className="text-2xl font-bold text-ink">
-                      {view.companion.custom_name ?? view.path.default_name ?? view.path.name}
+                      {activeCompanionName}
                     </h2>
                     <button
+                      type="button"
                       onClick={startRename}
                       className="rounded p-1 text-ink-muted hover:text-ink"
                       aria-label="Rename"
@@ -394,14 +538,13 @@ const confirmChoice = async () => {
 
                 {line && (
                   <div className="mt-4 rounded-lg bg-surface-sunken p-3 text-sm italic text-ink">
-                    "{line}"
+                    &quot;{line}&quot;
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Progress card */}
           <div className={styles.card}>
             <div className="flex items-baseline justify-between">
               <h3 className="font-semibold text-ink">Bond XP</h3>
@@ -425,12 +568,23 @@ const confirmChoice = async () => {
               </p>
             ) : (
               <p className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald">
-                <Sparkles size={14} /> Mastered — fully evolved.
+                <Sparkles size={14} /> Mastered. Fully evolved.
               </p>
             )}
           </div>
 
-          {/* Recent events */}
+          <div className={styles.card}>
+            <h3 className="font-semibold text-ink">Companion collection</h3>
+            <p className="mt-1 text-sm text-ink-muted">
+              Fully evolved companions stay here. You can switch back to them
+              any time.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {collection.map((item) => renderCompanionCard(item, "collection"))}
+          </div>
+
           {recentEvents.length > 0 && (
             <div className={styles.card}>
               <h3 className="font-semibold text-ink">Recent Activity</h3>
@@ -452,7 +606,6 @@ const confirmChoice = async () => {
             </div>
           )}
 
-          {/* Off / settings */}
           <div className={styles.card}>
             <h3 className="font-semibold text-ink">Settings</h3>
             <p className="mt-1 text-sm text-ink-muted">
@@ -460,6 +613,7 @@ const confirmChoice = async () => {
               and you can resume later.
             </p>
             <button
+              type="button"
               onClick={handleTurnOff}
               className="mt-4 flex items-center gap-2 rounded-xl border border-red-300 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
             >

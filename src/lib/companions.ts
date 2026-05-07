@@ -12,7 +12,23 @@ export type CompanionPath = {
   default_name: string | null;
   is_starter: boolean;
   is_active: boolean;
+  display_order?: number | null;
+  companion_type?: CompanionType | null;
+  unlock_requirement_type?: CompanionUnlockRequirementType | null;
+  unlock_requirement_target?: number | null;
+  unlock_label?: string | null;
 };
+
+export type CompanionType = "power" | "fuel" | "spirit";
+
+export type CompanionUnlockRequirementType =
+  | "starter"
+  | "workouts_completed"
+  | "weekly_check_ins"
+  | "different_recipes"
+  | "water_targets"
+  | "milestone_photo_sets"
+  | "manual";
 
 export type CompanionForm = {
   id: string;
@@ -66,6 +82,19 @@ export type ActiveCompanionView = {
   isMaxForm: boolean;
 };
 
+export type CompanionCollectionItem = {
+  path: CompanionPath;
+  companion: ClientCompanion | null;
+  previewForm: CompanionForm | null;
+  currentForm: CompanionForm | null;
+  isActive: boolean;
+  isMastered: boolean;
+  isUnlocked: boolean;
+  progress: number;
+  target: number | null;
+  unlockLabel: string | null;
+};
+
 // =====================================================================
 // Feature flag
 // =====================================================================
@@ -117,6 +146,18 @@ export const listAvailablePaths = async (): Promise<CompanionPath[]> => {
   return data as CompanionPath[];
 };
 
+export const listClientCompanions = async (
+  clientId: string
+): Promise<ClientCompanion[]> => {
+  const { data, error } = await supabase
+    .from("client_companions")
+    .select("*")
+    .eq("client_id", clientId);
+
+  if (error || !data) return [];
+  return data as ClientCompanion[];
+};
+
 export const getFormsForPath = async (
   pathId: string
 ): Promise<CompanionForm[]> => {
@@ -128,6 +169,147 @@ export const getFormsForPath = async (
 
   if (error || !data) return [];
   return data as CompanionForm[];
+};
+
+const getDifferentRecipeCount = async (clientId: string) => {
+  const { data, error } = await supabase
+    .from("meal_logs")
+    .select("recipe_id")
+    .eq("client_id", clientId)
+    .eq("completed", true)
+    .not("recipe_id", "is", null);
+
+  if (error || !data) return 0;
+
+  return new Set(
+    data
+      .map((row) => row.recipe_id as string | null)
+      .filter((recipeId): recipeId is string => Boolean(recipeId))
+  ).size;
+};
+
+const getUnlockProgress = async (
+  clientId: string,
+  requirementType: CompanionUnlockRequirementType | null | undefined
+) => {
+  switch (requirementType) {
+    case "workouts_completed": {
+      const { count, error } = await supabase
+        .from("client_workout_completions")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId);
+      return error ? 0 : count ?? 0;
+    }
+    case "weekly_check_ins": {
+      const { count, error } = await supabase
+        .from("client_weekly_check_ins")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId);
+      return error ? 0 : count ?? 0;
+    }
+    case "different_recipes":
+      return getDifferentRecipeCount(clientId);
+    case "water_targets": {
+      const { count, error } = await supabase
+        .from("daily_tracking")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId)
+        .eq("water_completed", true);
+      return error ? 0 : count ?? 0;
+    }
+    case "milestone_photo_sets": {
+      const { count, error } = await supabase
+        .from("client_milestones")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId)
+        .eq("photos_completed", true);
+      return error ? 0 : count ?? 0;
+    }
+    default:
+      return 0;
+  }
+};
+
+const defaultUnlockLabel = (
+  requirementType: CompanionUnlockRequirementType | null | undefined,
+  target: number | null | undefined
+) => {
+  switch (requirementType) {
+    case "workouts_completed":
+      return `Complete ${target ?? 0} workouts`;
+    case "weekly_check_ins":
+      return `Submit ${target ?? 0} weekly check-ins`;
+    case "different_recipes":
+      return `Try ${target ?? 0} different recipes`;
+    case "water_targets":
+      return `Hit your water target ${target ?? 0} times`;
+    case "milestone_photo_sets":
+      return `Upload ${target ?? 0} milestone photo set${target === 1 ? "" : "s"}`;
+    case "manual":
+      return "Locked for now";
+    default:
+      return null;
+  }
+};
+
+export const listCompanionCollection = async (
+  clientId: string
+): Promise<CompanionCollectionItem[]> => {
+  const [paths, companions] = await Promise.all([
+    listAvailablePaths(),
+    listClientCompanions(clientId),
+  ]);
+
+  const companionByPathId = new Map(
+    companions.map((companion) => [companion.path_id, companion])
+  );
+
+  const items = await Promise.all(
+    paths.map(async (path) => {
+      const companion = companionByPathId.get(path.id) ?? null;
+      const forms = await getFormsForPath(path.id);
+      const previewForm = forms[0] ?? null;
+
+      let currentForm = previewForm;
+      if (companion) {
+        for (const form of forms) {
+          if (companion.xp >= form.xp_required) currentForm = form;
+          else break;
+        }
+      }
+
+      const target = path.unlock_requirement_target ?? null;
+      const requirementType = path.unlock_requirement_type ?? null;
+      const isStarter = path.is_starter || requirementType === "starter";
+      const progress = isStarter || companion ? target ?? 0 : await getUnlockProgress(clientId, requirementType);
+      const isUnlocked =
+        isStarter ||
+        Boolean(companion) ||
+        requirementType === null ||
+        (target !== null && progress >= target);
+
+      return {
+        path,
+        companion,
+        previewForm,
+        currentForm,
+        isActive: Boolean(companion?.is_active),
+        isMastered: Boolean(companion?.is_mastered),
+        isUnlocked,
+        progress,
+        target,
+        unlockLabel:
+          path.unlock_label ?? defaultUnlockLabel(requirementType, target),
+      };
+    })
+  );
+
+  return items.sort((a, b) => {
+    const orderA = a.path.display_order ?? 999;
+    const orderB = b.path.display_order ?? 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.path.name.localeCompare(b.path.name);
+  });
 };
 
 // =====================================================================
