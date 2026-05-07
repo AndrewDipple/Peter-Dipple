@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -23,7 +23,7 @@ import CompanionEvolutionCelebration, {
   type CompanionEvolutionCelebrationData,
 } from "./CompanionEvolutionCelebration";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Role, isStaff } from "@/lib/roles";
+import { Role, isAdmin, isStaff } from "@/lib/roles";
 
 type NavItem = {
   href: string;
@@ -78,6 +78,47 @@ export default function AppShell({ userType, children }: Props) {
 
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const fetchProfile = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    // Clients have their display data on the clients table.
+    // Trainers and admins have it on profiles.
+    if (isStaff(userType)) {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("full_name, avatar_url")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileData?.full_name) {
+        setDisplayName(profileData.full_name);
+        setAvatarUrl(profileData.avatar_url);
+        return;
+      }
+    } else {
+      const { data: clientData } = await supabase
+        .from("clients")
+        .select("full_name, avatar_url")
+        .eq("profile_id", user.id)
+        .maybeSingle();
+
+      if (clientData?.full_name) {
+        setDisplayName(clientData.full_name);
+        setAvatarUrl(clientData.avatar_url);
+        return;
+      }
+    }
+
+    // Fallback: use the email prefix if we can't find a name.
+    if (user.email) {
+      setDisplayName(user.email.split("@")[0]);
+    }
+  }, [userType]);
+
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -90,49 +131,19 @@ export default function AppShell({ userType, children }: Props) {
   }, []);
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    fetchProfile();
+  }, [fetchProfile]);
 
-      if (!user) return;
-
-      // Clients have their display data on the clients table.
-      // Trainers and admins have it on profiles.
-      if (isStaff(userType)) {
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("full_name, avatar_url")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profileData?.full_name) {
-          setDisplayName(profileData.full_name);
-          setAvatarUrl(profileData.avatar_url);
-          return;
-        }
-      } else {
-        const { data: clientData } = await supabase
-          .from("clients")
-          .select("full_name, avatar_url")
-          .eq("profile_id", user.id)
-          .maybeSingle();
-
-        if (clientData?.full_name) {
-          setDisplayName(clientData.full_name);
-          setAvatarUrl(clientData.avatar_url);
-          return;
-        }
-      }
-
-      // Fallback: use the email prefix if we can't find a name.
-      if (user.email) {
-        setDisplayName(user.email.split("@")[0]);
-      }
+  useEffect(() => {
+    const handleProfileUpdated = () => {
+      fetchProfile();
     };
 
-    fetchProfile();
-  }, [userType]);
+    window.addEventListener("profile:updated", handleProfileUpdated);
+    return () => {
+      window.removeEventListener("profile:updated", handleProfileUpdated);
+    };
+  }, [fetchProfile]);
 
   useEffect(() => {
     const handleCompanionEvolution = (event: Event) => {
@@ -218,6 +229,16 @@ export default function AppShell({ userType, children }: Props) {
   const handleOpenNotifications = () => {
     setMenuOpen(false);
     router.push("/notifications");
+  };
+
+  const handleOpenMessages = () => {
+    setMenuOpen(false);
+    router.push("/messages");
+  };
+
+  const handleOpenAdmin = () => {
+    setMenuOpen(false);
+    router.push("/admin");
   };
 
   const handleOpenPrivacy = () => {
@@ -351,12 +372,32 @@ export default function AppShell({ userType, children }: Props) {
 
                 <button
                   type="button"
+                  onClick={handleOpenMessages}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <MessageSquare size={16} />
+                  Messages
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleOpenSettings}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
                 >
                   <Settings size={16} />
                   Settings
                 </button>
+
+                {isAdmin(userType) && (
+                  <button
+                    type="button"
+                    onClick={handleOpenAdmin}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                  >
+                    <Users size={16} />
+                    Admin
+                  </button>
+                )}
 
                 <button
                   type="button"

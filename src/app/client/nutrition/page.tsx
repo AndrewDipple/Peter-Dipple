@@ -507,6 +507,7 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
             title="Nutrition question"
             placeholder="Ask about meals, travel, swaps, or anything nutrition-related..."
             accent="nutrition"
+            showRecentMessages={false}
           />
         )}
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import Link from "next/link";
+import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
 
 type PageProps = {
   params: Promise<{
@@ -76,6 +77,13 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [addingExerciseForDay, setAddingExerciseForDay] = useState<
     Record<string, boolean>
   >({});
+  const [draggedExercise, setDraggedExercise] = useState<{
+    dayId: string;
+    exerciseId: string;
+  } | null>(null);
+  const [draggedDayId, setDraggedDayId] = useState<string | null>(null);
+  const [reorderingDayId, setReorderingDayId] = useState<string | null>(null);
+  const [reorderingDays, setReorderingDays] = useState(false);
 
 const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
 
@@ -86,6 +94,67 @@ const [editExerciseValues, setEditExerciseValues] = useState<
   const sortedDays = useMemo(() => {
     return [...days].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }, [days]);
+
+  const sortExercises = (exercises: ProgramTemplateExercise[]) =>
+    [...exercises].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const persistDayOrder = async (
+    reorderedDays: ProgramTemplateDay[],
+    previousDays: ProgramTemplateDay[]
+  ) => {
+    setReorderingDays(true);
+
+    const results = await Promise.all(
+      reorderedDays.map((day, index) =>
+        supabase
+          .from("program_template_days")
+          .update({ sort_order: index + 1 })
+          .eq("id", day.id)
+      )
+    );
+
+    const failed = results.some((result) => result.error);
+
+    if (failed) {
+      setDays(previousDays);
+      alert("Error reordering days");
+    }
+
+    setReorderingDays(false);
+  };
+
+  const reorderDay = async (sourceDayId: string, targetDayId: string) => {
+    if (sourceDayId === targetDayId) return;
+
+    const previousDays = [...sortedDays];
+    const sourceIndex = previousDays.findIndex((day) => day.id === sourceDayId);
+    const targetIndex = previousDays.findIndex((day) => day.id === targetDayId);
+
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    const reorderedDays = [...previousDays];
+    const [movedDay] = reorderedDays.splice(sourceIndex, 1);
+    reorderedDays.splice(targetIndex, 0, movedDay);
+
+    const withSortOrder = reorderedDays.map((day, index) => ({
+      ...day,
+      sort_order: index + 1,
+    }));
+
+    setDays(withSortOrder);
+    await persistDayOrder(withSortOrder, previousDays);
+  };
+
+  const moveDay = async (dayId: string, direction: "up" | "down") => {
+    const currentIndex = sortedDays.findIndex((day) => day.id === dayId);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    const targetDay = sortedDays[targetIndex];
+    if (!targetDay) return;
+
+    await reorderDay(dayId, targetDay.id);
+  };
 
   const loadPage = async () => {
     setLoading(true);
@@ -370,6 +439,88 @@ const [editExerciseValues, setEditExerciseValues] = useState<
       ),
     }));
   };
+
+  const persistExerciseOrder = async (
+    dayId: string,
+    reorderedExercises: ProgramTemplateExercise[],
+    previousExercises: ProgramTemplateExercise[]
+  ) => {
+    setReorderingDayId(dayId);
+
+    const updates = reorderedExercises.map((exercise, index) =>
+      supabase
+        .from("program_template_exercises")
+        .update({ sort_order: index + 1 })
+        .eq("id", exercise.id)
+    );
+
+    const results = await Promise.all(updates);
+    const failed = results.some((result) => result.error);
+
+    if (failed) {
+      setExercisesByDay((prev) => ({
+        ...prev,
+        [dayId]: previousExercises,
+      }));
+      alert("Error reordering exercises");
+    }
+
+    setReorderingDayId(null);
+  };
+
+  const reorderExercise = async (
+    dayId: string,
+    sourceExerciseId: string,
+    targetExerciseId: string
+  ) => {
+    if (sourceExerciseId === targetExerciseId) return;
+
+    const previousExercises = sortExercises(exercisesByDay[dayId] ?? []);
+    const sourceIndex = previousExercises.findIndex(
+      (exercise) => exercise.id === sourceExerciseId
+    );
+    const targetIndex = previousExercises.findIndex(
+      (exercise) => exercise.id === targetExerciseId
+    );
+
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    const reorderedExercises = [...previousExercises];
+    const [movedExercise] = reorderedExercises.splice(sourceIndex, 1);
+    reorderedExercises.splice(targetIndex, 0, movedExercise);
+
+    const withSortOrder = reorderedExercises.map((exercise, index) => ({
+      ...exercise,
+      sort_order: index + 1,
+    }));
+
+    setExercisesByDay((prev) => ({
+      ...prev,
+      [dayId]: withSortOrder,
+    }));
+
+    await persistExerciseOrder(dayId, withSortOrder, previousExercises);
+  };
+
+  const moveExercise = async (
+    dayId: string,
+    exerciseId: string,
+    direction: "up" | "down"
+  ) => {
+    const currentExercises = sortExercises(exercisesByDay[dayId] ?? []);
+    const currentIndex = currentExercises.findIndex(
+      (exercise) => exercise.id === exerciseId
+    );
+
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    const targetExercise = currentExercises[targetIndex];
+
+    if (!targetExercise) return;
+
+    await reorderExercise(dayId, exerciseId, targetExercise.id);
+  };
 const handleStartEditExercise = (exercise: ProgramTemplateExercise) => {
   setEditingExerciseId(exercise.id);
 
@@ -506,13 +657,46 @@ const handleSaveExerciseEdit = async (
             </div>
           ) : (
             sortedDays.map((day) => {
-              const dayExercises = exercisesByDay[day.id] ?? [];
+              const dayExercises = sortExercises(exercisesByDay[day.id] ?? []);
               const results = exerciseResults[day.id] ?? [];
 
               return (
-                <div key={day.id} className={styles.card}>
+                <div
+                  key={day.id}
+                  onDragOver={(event) => {
+                    if (draggedDayId) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (draggedDayId) {
+                      reorderDay(draggedDayId, day.id);
+                    }
+                    setDraggedDayId(null);
+                  }}
+                  className={`${styles.card} ${
+                    draggedDayId === day.id ? "border-gold bg-gold/10" : ""
+                  }`}
+                >
                   <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                    <div className="flex-1">
+                    <div className="flex flex-1 items-end gap-3">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          setDraggedDayId(day.id);
+                        }}
+                        onDragEnd={() => setDraggedDayId(null)}
+                        aria-label={`Drag ${day.day_name ?? "day"} to reorder`}
+                        className="mb-2 cursor-grab rounded-lg p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink active:cursor-grabbing"
+                      >
+                        <GripVertical size={18} />
+                      </button>
+
+                      <div className="flex-1">
                       <label className="text-sm font-medium text-ink">
                         Day name
                       </label>
@@ -530,15 +714,48 @@ const handleSaveExerciseEdit = async (
                         onBlur={(e) => handleRenameDay(day.id, e.target.value)}
                         className={styles.input}
                       />
+                      </div>
                     </div>
 
-                    <button
-                      onClick={() => handleRemoveDay(day.id)}
-                      className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
-                    >
-                      Remove Day
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => moveDay(day.id, "up")}
+                        disabled={
+                          sortedDays.findIndex((item) => item.id === day.id) ===
+                            0 || reorderingDays
+                        }
+                        aria-label={`Move ${day.day_name ?? "day"} up`}
+                        className="rounded-xl border border-border-subtle px-3 py-2 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ArrowUp size={16} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => moveDay(day.id, "down")}
+                        disabled={
+                          sortedDays.findIndex((item) => item.id === day.id) ===
+                            sortedDays.length - 1 || reorderingDays
+                        }
+                        aria-label={`Move ${day.day_name ?? "day"} down`}
+                        className="rounded-xl border border-border-subtle px-3 py-2 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ArrowDown size={16} />
+                      </button>
+
+                      <button
+                        onClick={() => handleRemoveDay(day.id)}
+                        className="rounded-xl border border-red-300 px-4 py-2 text-red-600 hover:bg-red-50"
+                      >
+                        Remove Day
+                      </button>
+                    </div>
                   </div>
+
+                  {reorderingDays && (
+                    <p className="mt-2 text-xs text-ink-muted">Saving day order...</p>
+                  )}
 
                   <div className="mt-6 rounded-xl border border-slate-200 p-4">
                     <h3 className="text-sm font-semibold text-ink">
@@ -663,15 +880,20 @@ const handleSaveExerciseEdit = async (
                   </div>
 
                   <div className="mt-6">
-                    <h3 className="text-sm font-semibold text-ink">
-                      Exercises
-                    </h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold text-ink">
+                        Exercises
+                      </h3>
+                      {reorderingDayId === day.id && (
+                        <p className="text-xs text-ink-muted">Saving order...</p>
+                      )}
+                    </div>
 
                     <div className="mt-3 space-y-2">
                       {dayExercises.length === 0 ? (
                         <p className={styles.body}>No exercises added yet.</p>
                       ) : (
-dayExercises.map((exercise) => {
+dayExercises.map((exercise, index) => {
   const isEditing = editingExerciseId === exercise.id;
 
   const values = editExerciseValues[exercise.id] ?? {
@@ -690,12 +912,43 @@ dayExercises.map((exercise) => {
   return (
     <div
       key={exercise.id}
-      className="flex flex-col gap-3 rounded-xl border border-slate-200 px-4 py-3"
+      draggable={!isEditing}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        setDraggedExercise({ dayId: day.id, exerciseId: exercise.id });
+      }}
+      onDragOver={(event) => {
+        if (draggedExercise?.dayId === day.id) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        if (draggedExercise?.dayId === day.id) {
+          reorderExercise(day.id, draggedExercise.exerciseId, exercise.id);
+        }
+        setDraggedExercise(null);
+      }}
+      onDragEnd={() => setDraggedExercise(null)}
+      className={`flex flex-col gap-3 rounded-xl border px-4 py-3 transition ${
+        draggedExercise?.exerciseId === exercise.id
+          ? "border-gold bg-gold/10 opacity-70"
+          : "border-slate-200 bg-surface-raised"
+      }`}
     >
       {!isEditing ? (
         // 🔹 NORMAL VIEW
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
+          <div className="flex min-w-0 items-start gap-3">
+            <button
+              type="button"
+              aria-label={`Drag ${exercise.exercise_name ?? "exercise"} to reorder`}
+              className="mt-1 cursor-grab rounded-lg p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink active:cursor-grabbing"
+            >
+              <GripVertical size={18} />
+            </button>
+            <div className="min-w-0">
             <p className="font-medium text-ink">
               {exercise.exercise_name}
             </p>
@@ -706,9 +959,32 @@ dayExercises.map((exercise) => {
                 ? ` • ${exercise.target_weight_kg} kg`
                 : ""}
             </p>
+            </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => moveExercise(day.id, exercise.id, "up")}
+              disabled={index === 0 || reorderingDayId === day.id}
+              aria-label={`Move ${exercise.exercise_name ?? "exercise"} up`}
+              className="rounded-xl border border-border-subtle px-3 py-2 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ArrowUp size={16} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => moveExercise(day.id, exercise.id, "down")}
+              disabled={
+                index === dayExercises.length - 1 || reorderingDayId === day.id
+              }
+              aria-label={`Move ${exercise.exercise_name ?? "exercise"} down`}
+              className="rounded-xl border border-border-subtle px-3 py-2 text-ink-muted hover:bg-surface-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ArrowDown size={16} />
+            </button>
+
             <button
               onClick={() => handleStartEditExercise(exercise)}
               className={styles.buttonSecondary}

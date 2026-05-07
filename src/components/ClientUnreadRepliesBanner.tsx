@@ -21,9 +21,9 @@ type ClientUnreadRepliesBannerProps = {
 };
 
 const contextHref: Record<ClientReplyContext, string> = {
-  general: "/client/dashboard#message-trainer",
-  workout_day: "/client/workout#message-trainer",
-  nutrition: "/client/nutrition#message-trainer",
+  general: "/messages",
+  workout_day: "/messages",
+  nutrition: "/messages",
 };
 
 export default function ClientUnreadRepliesBanner({
@@ -84,7 +84,7 @@ export default function ClientUnreadRepliesBanner({
 
   const handleReadReply = async () => {
     const href = latestReply
-      ? contextHref[latestReply.context_type] ?? "/client/dashboard"
+      ? contextHref[latestReply.context_type] ?? "/messages"
       : "/client/dashboard";
 
     await markRead();

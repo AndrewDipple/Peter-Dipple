@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { formatWeekLabel } from "@/lib/dates";
+import { X } from "lucide-react";
 
 type WeeklyCheckInCardProps = {
   clientId: string;
   weekStart: string;
+  presentation?: "card" | "modal";
 };
 
 const ratingFields = [
@@ -33,8 +35,10 @@ const emptyRatings: Ratings = {
 export default function WeeklyCheckInCard({
   clientId,
   weekStart,
+  presentation = "card",
 }: WeeklyCheckInCardProps) {
   const [completed, setCompleted] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const [ratings, setRatings] = useState<Ratings>(emptyRatings);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -76,7 +80,7 @@ export default function WeeklyCheckInCard({
     );
 
     if (error) {
-      alert("Check-in could not be saved. Please try again.");
+      alert(`Check-in could not be saved: ${error.message}`);
       setSaving(false);
       return;
     }
@@ -85,16 +89,28 @@ export default function WeeklyCheckInCard({
     setSaving(false);
   };
 
-  if (loading || completed) return null;
+  if (loading || completed || dismissed) return null;
 
-  return (
+  const content = (
     <div className={styles.card}>
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-wide text-gold">
-          Weekly Check-In
-        </p>
-        <h2 className={`${styles.h2} mt-1`}>How are you getting on?</h2>
-        <p className="mt-1 text-sm text-ink-muted">{formatWeekLabel(weekStart)}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-gold">
+            Weekly Check-In
+          </p>
+          <h2 className={`${styles.h2} mt-1`}>How are you getting on?</h2>
+          <p className="mt-1 text-sm text-ink-muted">{formatWeekLabel(weekStart)}</p>
+        </div>
+        {presentation === "modal" && (
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            className="rounded-full p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink"
+            aria-label="Dismiss weekly check-in"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-5">
@@ -141,4 +157,14 @@ export default function WeeklyCheckInCard({
       </button>
     </div>
   );
+
+  if (presentation === "modal") {
+    return (
+      <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/60 p-4">
+        <div className="w-full max-w-3xl">{content}</div>
+      </div>
+    );
+  }
+
+  return content;
 }

@@ -24,6 +24,7 @@ type MessageTrainerBoxProps = {
   title?: string;
   placeholder?: string;
   accent?: "default" | "workout" | "nutrition";
+  showRecentMessages?: boolean;
 };
 
 const accentClasses = {
@@ -41,6 +42,7 @@ export default function MessageTrainerBox({
   title = "Message your trainer",
   placeholder = "Ask a question or leave a quick note...",
   accent = "default",
+  showRecentMessages = true,
 }: MessageTrainerBoxProps) {
   const [body, setBody] = useState("");
   const [messages, setMessages] = useState<ClientMessage[]>([]);
@@ -130,35 +132,37 @@ export default function MessageTrainerBox({
         </button>
       </div>
 
-      <div className="mt-4 space-y-2">
-        {loading ? (
-          <p className="text-sm text-ink-muted">Loading recent messages...</p>
-        ) : messages.length === 0 ? (
-          <p className="text-sm text-ink-muted">No messages here yet.</p>
-        ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className="rounded-lg border border-border-subtle bg-surface-sunken px-3 py-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                  {message.sender_role === "trainer" ? "Trainer" : "You"}
-                </p>
-                <p className="text-xs text-ink-muted">
-                  {new Date(message.created_at).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                  })}
+      {showRecentMessages && (
+        <div className="mt-4 space-y-2">
+          {loading ? (
+            <p className="text-sm text-ink-muted">Loading recent messages...</p>
+          ) : messages.length === 0 ? (
+            <p className="text-sm text-ink-muted">No messages here yet.</p>
+          ) : (
+            messages.map((message) => (
+              <div
+                key={message.id}
+                className="rounded-lg border border-border-subtle bg-surface-sunken px-3 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    {message.sender_role === "trainer" ? "Trainer" : "You"}
+                  </p>
+                  <p className="text-xs text-ink-muted">
+                    {new Date(message.created_at).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </p>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                  {message.body}
                 </p>
               </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
-                {message.body}
-              </p>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

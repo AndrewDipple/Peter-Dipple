@@ -35,6 +35,7 @@ const sections = [
     body: [
       "Information is kept while you are an active coaching client. After you leave, records may be kept for up to 12 months for continuity, support, accountability, and record-keeping, unless deletion is requested earlier and no overriding reason requires retention.",
       "Where a deletion request is recorded, the account can be reviewed and deleted using the app's admin deletion process.",
+      "Deleted information may remain briefly in managed backups until those backups expire through the normal backup cycle. Deleted data will not be restored into active use unless needed for legal, security, or disaster-recovery reasons.",
     ],
   },
   {

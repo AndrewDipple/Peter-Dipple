@@ -22,12 +22,12 @@ export const lookupExerciseIdsByName = async (
 
   if (cleanedNames.length === 0) return new Map();
 
-  // Fetch matching exercises. We over-fetch slightly (case-sensitive match)
-  // and then build a normalised lookup map in JS.
+  // Fetch exercises and build a normalised lookup in JS. Supabase `.in()` is
+  // case-sensitive, which can miss valid exercise names with casing/spacing
+  // differences and leave client programme rows without video metadata.
   const { data, error } = await supabase
     .from("exercises")
-    .select("id, name")
-    .in("name", cleanedNames);
+    .select("id, name");
 
   if (error || !data) {
     // If we can't reach exercises, fall back gracefully — caller will insert
@@ -36,9 +36,13 @@ export const lookupExerciseIdsByName = async (
   }
 
   // Build normalised map: lowercased+trimmed name → exercise id
+  const requestedNames = new Set(
+    cleanedNames.map((name) => name.toLowerCase().trim())
+  );
+
   const map = new Map<string, string>();
   for (const row of data) {
-    if (row.name) {
+    if (row.name && requestedNames.has(row.name.toLowerCase().trim())) {
       map.set(row.name.toLowerCase().trim(), row.id);
     }
   }

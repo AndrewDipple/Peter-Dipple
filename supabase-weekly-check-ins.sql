@@ -1,4 +1,5 @@
--- Run this in Supabase SQL Editor before using weekly client check-ins.
+-- Weekly check-ins table, RLS, and one-per-week enforcement.
+-- Run this in Supabase SQL Editor.
 
 create table if not exists public.client_weekly_check_ins (
   id uuid primary key default gen_random_uuid(),
@@ -11,75 +12,40 @@ create table if not exists public.client_weekly_check_ins (
   sleep_quality integer not null check (sleep_quality between 1 and 5),
   notes text,
   submitted_at timestamptz not null default now(),
-  created_at timestamptz not null default now(),
-  unique (client_id, week_start)
+  created_at timestamptz not null default now()
 );
 
-create index if not exists client_weekly_check_ins_client_week_idx
-  on public.client_weekly_check_ins (client_id, week_start desc);
+create unique index if not exists client_weekly_check_ins_client_week_unique
+  on public.client_weekly_check_ins (client_id, week_start);
 
 alter table public.client_weekly_check_ins enable row level security;
 
-drop policy if exists "Clients can read own weekly check-ins"
-  on public.client_weekly_check_ins;
-create policy "Clients can read own weekly check-ins"
+drop policy if exists "Clients can view own weekly check-ins" on public.client_weekly_check_ins;
+create policy "Clients can view own weekly check-ins"
   on public.client_weekly_check_ins
   for select
-  using (
-    exists (
-      select 1
-      from public.clients
-      where clients.id = client_weekly_check_ins.client_id
-        and clients.profile_id = auth.uid()
-    )
-  );
+  to authenticated
+  using (public.app_owns_client(client_id));
 
-drop policy if exists "Clients can submit own weekly check-ins"
-  on public.client_weekly_check_ins;
+drop policy if exists "Clients can submit own weekly check-ins" on public.client_weekly_check_ins;
 create policy "Clients can submit own weekly check-ins"
   on public.client_weekly_check_ins
   for insert
-  with check (
-    exists (
-      select 1
-      from public.clients
-      where clients.id = client_weekly_check_ins.client_id
-        and clients.profile_id = auth.uid()
-    )
-  );
+  to authenticated
+  with check (public.app_owns_client(client_id));
 
-drop policy if exists "Clients can update own weekly check-ins"
-  on public.client_weekly_check_ins;
+drop policy if exists "Clients can update own weekly check-ins" on public.client_weekly_check_ins;
 create policy "Clients can update own weekly check-ins"
   on public.client_weekly_check_ins
   for update
-  using (
-    exists (
-      select 1
-      from public.clients
-      where clients.id = client_weekly_check_ins.client_id
-        and clients.profile_id = auth.uid()
-    )
-  )
-  with check (
-    exists (
-      select 1
-      from public.clients
-      where clients.id = client_weekly_check_ins.client_id
-        and clients.profile_id = auth.uid()
-    )
-  );
+  to authenticated
+  using (public.app_owns_client(client_id))
+  with check (public.app_owns_client(client_id));
 
-drop policy if exists "Staff can read weekly check-ins"
-  on public.client_weekly_check_ins;
-create policy "Staff can read weekly check-ins"
+drop policy if exists "Staff can manage weekly check-ins" on public.client_weekly_check_ins;
+create policy "Staff can manage weekly check-ins"
   on public.client_weekly_check_ins
-  for select
-  using (
-    exists (
-      select 1
-      from public.profiles
-      where profiles.id = auth.uid()
-        and profiles.role in ('trainer', 'admin')
-    )
-  );
+  for all
+  to authenticated
+  using (public.app_is_staff())
+  with check (public.app_is_staff());

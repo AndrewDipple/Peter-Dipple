@@ -2,6 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { recordAdminAuditEvent } from "@/lib/adminAudit";
 
+const PROGRESS_PHOTOS_BUCKET = "progress-photos";
+const SAR_PHOTO_URL_TTL_SECONDS = 60 * 60 * 24;
+
 const isAdminRole = (role: string | null | undefined) => role === "admin";
 
 type ExportTable = {
@@ -117,6 +120,21 @@ function safeFilePart(value: string) {
     .slice(0, 80);
 }
 
+function normalizeProgressPhotoPath(path: unknown) {
+  if (typeof path !== "string") return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+
+  const marker = `/${PROGRESS_PHOTOS_BUCKET}/`;
+  const markerIndex = trimmed.indexOf(marker);
+
+  if (markerIndex >= 0) {
+    return decodeURIComponent(trimmed.slice(markerIndex + marker.length));
+  }
+
+  return trimmed.startsWith("http") ? null : trimmed;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const adminContext = await requireAdmin(request);
@@ -174,6 +192,35 @@ export async function POST(request: NextRequest) {
       ? await supabaseAdmin.auth.admin.getUserById(client.profile_id)
       : null;
 
+    const { data: progressPhotos } = await supabaseAdmin
+      .from("progress_photos")
+      .select("id, image_url, storage_path, log_date, note")
+      .eq("client_id", clientId)
+      .order("log_date", { ascending: false });
+
+    const photoPaths = Array.from(
+      new Set(
+        (progressPhotos ?? [])
+          .map((photo) =>
+            normalizeProgressPhotoPath(photo.storage_path ?? photo.image_url)
+          )
+          .filter((path): path is string => Boolean(path))
+      )
+    );
+
+    const signedPhotoUrls =
+      photoPaths.length > 0
+        ? await supabaseAdmin.storage
+            .from(PROGRESS_PHOTOS_BUCKET)
+            .createSignedUrls(photoPaths, SAR_PHOTO_URL_TTL_SECONDS)
+        : null;
+
+    const signedUrlByPath = new Map(
+      (signedPhotoUrls?.data ?? [])
+        .filter((item) => item.path && item.signedUrl)
+        .map((item) => [item.path, item.signedUrl])
+    );
+
     const exportPayload = {
       export_type: "gdpr_subject_access_request",
       exported_at: new Date().toISOString(),
@@ -198,8 +245,26 @@ export async function POST(request: NextRequest) {
             }
           : null,
       tables: tableExports,
+      progress_photo_access: {
+        expires_in_seconds: SAR_PHOTO_URL_TTL_SECONDS,
+        expires_note:
+          "Progress photo links are temporary. Generate a fresh SAR export if they expire before review.",
+        photos: (progressPhotos ?? []).map((photo) => {
+          const path = normalizeProgressPhotoPath(
+            photo.storage_path ?? photo.image_url
+          );
+
+          return {
+            id: photo.id,
+            log_date: photo.log_date,
+            note: photo.note,
+            storage_path: path,
+            signed_url: path ? signedUrlByPath.get(path) ?? null : null,
+          };
+        }),
+      },
       notes: [
-        "Progress photo rows include storage paths. The binary image files remain in Supabase Storage until deleted or manually exported.",
+        "Progress photo access links are temporary signed URLs and should be handled securely.",
         "This export is intended for internal SAR handling and should be shared securely.",
       ],
     };
@@ -214,6 +279,8 @@ export async function POST(request: NextRequest) {
       metadata: {
         fileName,
         tableCount: Object.keys(tableExports).length,
+        progressPhotoCount: progressPhotos?.length ?? 0,
+        signedProgressPhotoCount: signedUrlByPath.size,
         note: auditNote,
       },
     });

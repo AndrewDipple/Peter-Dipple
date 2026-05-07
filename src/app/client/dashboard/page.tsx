@@ -744,13 +744,18 @@ You're currently in Week {clientProgram?.current_week}                </p>
               weekStart={weekStart}
             />
 
-            <WeeklyCheckInCard clientId={client.id} weekStart={weekStart} />
+            <WeeklyCheckInCard
+              clientId={client.id}
+              weekStart={weekStart}
+              presentation={today === weekStart ? "modal" : "card"}
+            />
 
             <MessageTrainerBox
               clientId={client.id}
               contextType="general"
               contextLabel="General check-in"
               placeholder="Ask a question or leave your trainer a quick update..."
+              showRecentMessages={false}
             />
 
             <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">

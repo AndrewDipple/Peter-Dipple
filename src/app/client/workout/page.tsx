@@ -16,6 +16,13 @@ import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
+import {
+  createOfflineId,
+  getOfflineWorkoutQueueCount,
+  queueOfflineWorkoutItem,
+  removeQueuedCompletion,
+  syncOfflineWorkoutQueue,
+} from "@/lib/offlineWorkoutQueue";
 
 type Client = {
   id: string;
@@ -64,7 +71,7 @@ type Exercise = {
 type ClientProgramDayExercise = {
   id: string;
   client_program_day_id: string;
-  exercise_id: string;
+  exercise_id: string | null;
   exercise_name: string | null;
   sets: number | null;
   reps: string | null;
@@ -156,6 +163,9 @@ export default function ClientWorkoutPage() {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [completingDay, setCompletingDay] = useState(false);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false);
+  const [isBrowserOffline, setIsBrowserOffline] = useState(false);
   const [debugMessage, setDebugMessage] = useState("");
   const [restTimer, setRestTimer] = useState<RestTimer | null>(null);
   const [showVideo, setShowVideo] = useState(false);
@@ -177,6 +187,30 @@ export default function ClientWorkoutPage() {
   const lastLineRef = useRef<string | null>(null);
 
   const today = useMemo(() => todayStr(), []);
+
+  const refreshOfflineQueueCount = () => {
+    setOfflineQueueCount(getOfflineWorkoutQueueCount());
+  };
+
+  const queueCreatedAt = () => new Date().toISOString();
+
+  const canTryNetworkWrite = () =>
+    typeof navigator === "undefined" || navigator.onLine;
+
+  const syncQueuedWorkoutChanges = async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+
+    setSyncingOfflineQueue(true);
+    try {
+      const result = await syncOfflineWorkoutQueue(supabase);
+      refreshOfflineQueueCount();
+      if (result.synced > 0) {
+        await loadWorkout();
+      }
+    } finally {
+      setSyncingOfflineQueue(false);
+    }
+  };
 
   useEffect(() => {
     if (!restTimer) return;
@@ -219,7 +253,7 @@ export default function ClientWorkoutPage() {
       .single();
 
     if (clientError || !clientData) {
-      setDebugMessage(`No client row matches logged-in user id: ${user.id}`);
+      setDebugMessage("Client account not found.");
       setLoading(false);
       return;
     }
@@ -297,6 +331,37 @@ export default function ClientWorkoutPage() {
   }, []);
 
   useEffect(() => {
+    const updateOnlineState = () => {
+      setIsBrowserOffline(!navigator.onLine);
+      refreshOfflineQueueCount();
+    };
+
+    updateOnlineState();
+
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+    window.addEventListener(
+      "pt-offline-workout-queue-changed",
+      refreshOfflineQueueCount
+    );
+
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+      window.removeEventListener(
+        "pt-offline-workout-queue-changed",
+        refreshOfflineQueueCount
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isBrowserOffline && offlineQueueCount > 0) {
+      syncQueuedWorkoutChanges();
+    }
+  }, [isBrowserOffline, offlineQueueCount]);
+
+  useEffect(() => {
     const loadSelectedDay = async () => {
       if (!client || !clientProgram || !selectedDayId) return;
 
@@ -333,7 +398,8 @@ export default function ClientWorkoutPage() {
         return;
       }
 
-      // Get all exercise IDs (current and original)
+      // Get all exercise IDs and names so older rows without exercise_id still
+      // receive video/rest/alternative data from the exercises table.
       const exerciseIds = exerciseData
         .map((e) => e.exercise_id)
         .filter(Boolean) as string[];
@@ -341,8 +407,16 @@ export default function ClientWorkoutPage() {
         .map((e) => e.original_exercise_id)
         .filter(Boolean) as string[];
       const allExerciseIds = [...new Set([...exerciseIds, ...originalExerciseIds])];
+      const exerciseNames = Array.from(
+        new Set(
+          exerciseData
+            .map((e) => e.exercise_name?.trim())
+            .filter(Boolean)
+        )
+      ) as string[];
 
       let exerciseDetailsMap: Record<string, Exercise> = {};
+      let exerciseDetailsNameMap: Record<string, Exercise> = {};
 
       if (allExerciseIds.length > 0) {
         const { data: exerciseDetails } = await supabase
@@ -357,11 +431,32 @@ export default function ClientWorkoutPage() {
         }
       }
 
+      if (exerciseNames.length > 0) {
+        const { data: exerciseDetailsByName } = await supabase
+          .from("exercises")
+          .select("*");
+
+        if (exerciseDetailsByName) {
+          const wantedNames = new Set(
+            exerciseNames.map((name) => name.toLowerCase().trim())
+          );
+
+          exerciseDetailsNameMap = Object.fromEntries(
+            exerciseDetailsByName
+              .filter((ex) => wantedNames.has(ex.name.toLowerCase().trim()))
+              .map((ex) => [ex.name.toLowerCase().trim(), ex])
+          );
+        }
+      }
+
       const enrichedExercises = exerciseData.map((ex) => ({
         ...ex,
-        exercise_details: ex.exercise_id
-          ? exerciseDetailsMap[ex.exercise_id] || null
-          : null,
+        exercise_details:
+          (ex.exercise_id ? exerciseDetailsMap[ex.exercise_id] : null) ||
+          (ex.exercise_name
+            ? exerciseDetailsNameMap[ex.exercise_name.toLowerCase().trim()] ||
+              null
+            : null),
       }));
 
       setDayExercises(enrichedExercises);
@@ -677,15 +772,56 @@ export default function ClientWorkoutPage() {
     setSavingKey(key);
 
     const existing = getSetLog(exerciseId, setNumber);
+    const nextLogValues = {
+      actual_weight_kg:
+        updates.actual_weight_kg ?? existing?.actual_weight_kg ?? null,
+      actual_reps: updates.actual_reps ?? existing?.actual_reps ?? null,
+      completed: updates.completed ?? existing?.completed ?? false,
+    };
+    const offlineSetPayload = {
+      client_id: clientId,
+      client_program_id: clientProgramId,
+      client_program_day_id: clientProgramDayId,
+      client_program_day_exercise_id: exerciseId,
+      log_date: today,
+      set_number: setNumber,
+      ...nextLogValues,
+    };
 
     if (!existing && clientProgram?.program_start_date === null) {
-      await supabase
-        .from("client_programs")
-        .update({
-          program_start_date: today,
-          current_week: 1,
-        })
-        .eq("id", clientProgramId);
+      if (canTryNetworkWrite()) {
+        const { error } = await supabase
+          .from("client_programs")
+          .update({
+            program_start_date: today,
+            current_week: 1,
+          })
+          .eq("id", clientProgramId);
+
+        if (error) {
+          queueOfflineWorkoutItem({
+            id: createOfflineId("program-start"),
+            type: "program_start",
+            createdAt: queueCreatedAt(),
+            payload: {
+              client_program_id: clientProgramId,
+              program_start_date: today,
+              current_week: 1,
+            },
+          });
+        }
+      } else {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("program-start"),
+          type: "program_start",
+          createdAt: queueCreatedAt(),
+          payload: {
+            client_program_id: clientProgramId,
+            program_start_date: today,
+            current_week: 1,
+          },
+        });
+      }
 
       setClientProgram((prev) =>
         prev
@@ -699,15 +835,62 @@ export default function ClientWorkoutPage() {
     }
 
     if (existing) {
+      const localLog = {
+        ...existing,
+        ...nextLogValues,
+      };
+
+      if (existing.id.startsWith("offline-set-")) {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log"),
+          type: "set_log_upsert",
+          createdAt: queueCreatedAt(),
+          payload: offlineSetPayload,
+        });
+        setSetLogs((prev) =>
+          prev.map((log) => (log.id === existing.id ? localLog : log))
+        );
+        setSavingKey(null);
+        return;
+      }
+
+      if (!canTryNetworkWrite()) {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log-update"),
+          type: "set_log_update",
+          createdAt: queueCreatedAt(),
+          payload: {
+            id: existing.id,
+            updates: nextLogValues,
+          },
+        });
+        setSetLogs((prev) =>
+          prev.map((log) => (log.id === existing.id ? localLog : log))
+        );
+        setSavingKey(null);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("client_program_set_logs")
-        .update(updates)
+        .update(nextLogValues)
         .eq("id", existing.id)
         .select()
         .single();
 
       if (error) {
-        alert("Error saving set");
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log-update"),
+          type: "set_log_update",
+          createdAt: queueCreatedAt(),
+          payload: {
+            id: existing.id,
+            updates: nextLogValues,
+          },
+        });
+        setSetLogs((prev) =>
+          prev.map((log) => (log.id === existing.id ? localLog : log))
+        );
         setSavingKey(null);
         return;
       }
@@ -716,26 +899,48 @@ export default function ClientWorkoutPage() {
         prev.map((log) => (log.id === existing.id ? data : log))
       );
     } else {
+      if (!canTryNetworkWrite()) {
+        const offlineLog = {
+          id: createOfflineId("offline-set"),
+          client_program_day_exercise_id: exerciseId,
+          set_number: setNumber,
+          log_date: today,
+          ...nextLogValues,
+        };
+
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log"),
+          type: "set_log_upsert",
+          createdAt: queueCreatedAt(),
+          payload: offlineSetPayload,
+        });
+        setSetLogs((prev) => [...prev, offlineLog]);
+        setSavingKey(null);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("client_program_set_logs")
-        .insert([
-          {
-            client_id: clientId,
-            client_program_id: clientProgramId,
-            client_program_day_id: clientProgramDayId,
-            client_program_day_exercise_id: exerciseId,
-            log_date: today,
-            set_number: setNumber,
-            actual_weight_kg: updates.actual_weight_kg ?? null,
-            actual_reps: updates.actual_reps ?? null,
-            completed: updates.completed ?? false,
-          },
-        ])
+        .insert([offlineSetPayload])
         .select()
         .single();
 
       if (error) {
-        alert("Error saving set");
+        const offlineLog = {
+          id: createOfflineId("offline-set"),
+          client_program_day_exercise_id: exerciseId,
+          set_number: setNumber,
+          log_date: today,
+          ...nextLogValues,
+        };
+
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log"),
+          type: "set_log_upsert",
+          createdAt: queueCreatedAt(),
+          payload: offlineSetPayload,
+        });
+        setSetLogs((prev) => [...prev, offlineLog]);
         setSavingKey(null);
         return;
       }
@@ -769,12 +974,12 @@ export default function ClientWorkoutPage() {
       },
     });
 
-    if (checked) {
+    if (checked && canTryNetworkWrite()) {
       const unlockedAchievements = await updateStreak(
         client.id,
         "workout",
         today
-      );
+      ).catch(() => []);
 
       if (unlockedAchievements.length > 0) {
         const achievementType = unlockedAchievements[0];
@@ -1015,14 +1220,59 @@ export default function ClientWorkoutPage() {
     setCompletingDay(true);
 
     if (currentDayCompletedToday && currentDayCompletion) {
+      if (currentDayCompletion.id.startsWith("offline-completion-")) {
+        removeQueuedCompletion({
+          client_id: currentDayCompletion.client_id,
+          client_program_id: currentDayCompletion.client_program_id,
+          client_program_day_id: currentDayCompletion.client_program_day_id,
+          completed_date: currentDayCompletion.completed_date,
+          completed_at: currentDayCompletion.completed_at ?? queueCreatedAt(),
+        });
+
+        setWorkoutCompletions((prev) =>
+          prev.filter((completion) => completion.id !== currentDayCompletion.id)
+        );
+        setCompletingDay(false);
+        alert("Workout day marked as incomplete for today.");
+        return;
+      }
+
+      if (!canTryNetworkWrite()) {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("completion-delete"),
+          type: "completion_delete",
+          createdAt: queueCreatedAt(),
+          payload: {
+            completion_id: currentDayCompletion.id,
+          },
+        });
+        setWorkoutCompletions((prev) =>
+          prev.filter((completion) => completion.id !== currentDayCompletion.id)
+        );
+        setCompletingDay(false);
+        alert("Workout day marked as incomplete for today. It will sync when you are back online.");
+        return;
+      }
+
       const { error } = await supabase
         .from("client_workout_completions")
         .delete()
         .eq("id", currentDayCompletion.id);
 
       if (error) {
-        alert("Error marking workout incomplete");
+        queueOfflineWorkoutItem({
+          id: createOfflineId("completion-delete"),
+          type: "completion_delete",
+          createdAt: queueCreatedAt(),
+          payload: {
+            completion_id: currentDayCompletion.id,
+          },
+        });
+        setWorkoutCompletions((prev) =>
+          prev.filter((completion) => completion.id !== currentDayCompletion.id)
+        );
         setCompletingDay(false);
+        alert("Workout day marked as incomplete for today. It will sync when you are back online.");
         return;
       }
 
@@ -1034,16 +1284,64 @@ export default function ClientWorkoutPage() {
       return;
     }
 
+    const completionPayload = {
+      client_id: client.id,
+      client_program_id: clientProgram.id,
+      client_program_day_id: currentDay.id,
+      completed_date: today,
+      completed_at: new Date().toISOString(),
+    };
+
+    if (!canTryNetworkWrite()) {
+      const offlineCompletion = {
+        id: createOfflineId("offline-completion"),
+        ...completionPayload,
+      };
+
+      queueOfflineWorkoutItem({
+        id: createOfflineId("completion"),
+        type: "completion_upsert",
+        createdAt: queueCreatedAt(),
+        payload: completionPayload,
+      });
+
+      const updatedCompletions = [
+        ...workoutCompletions.filter(
+          (completion) =>
+            !(
+              completion.client_program_day_id === currentDay.id &&
+              completion.completed_date === today
+            )
+        ),
+        offlineCompletion,
+      ];
+
+      setWorkoutCompletions(updatedCompletions);
+
+      const sortedDays = [...programDays].sort(
+        (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      );
+      const currentDayIndex = sortedDays.findIndex(
+        (day) => day.id === currentDay.id
+      );
+      const nextDay =
+        currentDayIndex >= 0
+          ? sortedDays[(currentDayIndex + 1) % sortedDays.length]
+          : getNextWorkoutDay(programDays, updatedCompletions);
+
+      if (nextDay) {
+        setSelectedDayId(nextDay.id);
+      }
+
+      setCompletingDay(false);
+      alert("Workout day completed! It will sync when you are back online.");
+      return;
+    }
+
     const { data, error } = await supabase
       .from("client_workout_completions")
       .upsert(
-        {
-          client_id: client.id,
-          client_program_id: clientProgram.id,
-          client_program_day_id: currentDay.id,
-          completed_date: today,
-          completed_at: new Date().toISOString(),
-        },
+        completionPayload,
         {
           onConflict:
             "client_id,client_program_id,client_program_day_id,completed_date",
@@ -1053,8 +1351,30 @@ export default function ClientWorkoutPage() {
       .single();
 
     if (error) {
-      alert("Error completing workout day");
+      const offlineCompletion = {
+        id: createOfflineId("offline-completion"),
+        ...completionPayload,
+      };
+
+      queueOfflineWorkoutItem({
+        id: createOfflineId("completion"),
+        type: "completion_upsert",
+        createdAt: queueCreatedAt(),
+        payload: completionPayload,
+      });
+
+      setWorkoutCompletions((prev) => [
+        ...prev.filter(
+          (completion) =>
+            !(
+              completion.client_program_day_id === currentDay.id &&
+              completion.completed_date === today
+            )
+        ),
+        offlineCompletion,
+      ]);
       setCompletingDay(false);
+      alert("Workout day completed! It will sync when you are back online.");
       return;
     }
 
@@ -1117,6 +1437,42 @@ export default function ClientWorkoutPage() {
   return (
     <>
       <h1 className={styles.display}>Workout</h1>
+
+      {(isBrowserOffline || offlineQueueCount > 0 || syncingOfflineQueue) && (
+        <div className="mt-4 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm text-ink">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-semibold">
+                {isBrowserOffline
+                  ? "Offline workout mode"
+                  : syncingOfflineQueue
+                    ? "Syncing saved workout changes"
+                    : "Workout changes waiting to sync"}
+              </p>
+              <p className="mt-1 text-ink-muted">
+                {offlineQueueCount > 0
+                  ? `${offlineQueueCount} change${offlineQueueCount === 1 ? "" : "s"} saved on this device. They will upload automatically when signal returns.`
+                  : "You can keep logging sets here; changes will save on this device until signal returns."}
+              </p>
+            </div>
+
+            {!isBrowserOffline && offlineQueueCount > 0 && (
+              <button
+                type="button"
+                onClick={syncQueuedWorkoutChanges}
+                disabled={syncingOfflineQueue}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-3 py-2 text-sm font-semibold text-ink hover:bg-gold/90 disabled:opacity-60"
+              >
+                <RefreshCw
+                  size={16}
+                  className={syncingOfflineQueue ? "animate-spin" : ""}
+                />
+                Sync now
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {restTimer && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-workout px-4 py-3 text-white shadow-lg">
@@ -1581,6 +1937,7 @@ activeExercise.exercise_details?.alternate && (
             title="Workout note"
             placeholder="How did this workout feel? Anything your trainer should know?"
             accent="workout"
+            showRecentMessages={false}
           />
 
           {/* Add Custom Exercise Section */}

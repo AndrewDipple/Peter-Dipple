@@ -94,8 +94,6 @@ export default function SettingsPage() {
         setFullName(profileRow.full_name ?? "");
       } else {
         // Clients edit their clients row, as before.
-               console.log("Settings page client lookup. user.id =", user.id);
-
         const { data: clientData, error: clientErr } = await supabase
           .from("clients")
           .select("id, full_name, marketing_consent_at, marketing_consent_version")
@@ -184,6 +182,7 @@ export default function SettingsPage() {
     if (error) {
       flashMessage("error", "Failed to save");
     } else {
+      window.dispatchEvent(new Event("profile:updated"));
       flashMessage("success", "Saved!");
     }
 

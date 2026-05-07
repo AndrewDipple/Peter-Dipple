@@ -111,7 +111,6 @@ async function checkStreakAchievements(
       });
 
       newlyUnlocked.push(achievement);
-      console.log(`🎉 Achievement unlocked: ${achievement}`);
     }
   }
 

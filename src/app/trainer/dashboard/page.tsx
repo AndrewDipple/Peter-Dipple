@@ -507,40 +507,6 @@ export default function TrainerDashboardPage() {
           </div>
         </div>
       )}
-      {!loading && unreadMessages.length > 0 && (
-        <div className="mb-6 rounded-lg border border-gold bg-gold/10 p-5">
-          <p className="text-sm font-semibold uppercase tracking-wide text-ink-muted">
-            New client messages
-          </p>
-          <h2 className="mt-1 text-xl font-semibold text-ink">
-            {unreadMessages.length} message{unreadMessages.length === 1 ? "" : "s"} waiting
-          </h2>
-
-          <div className="mt-4 space-y-2">
-            {unreadMessages.map((message) => (
-              <Link
-                key={message.id}
-                href={`/trainer/clients/${message.client_id}`}
-                className="block rounded-lg border border-border-subtle bg-surface-raised px-4 py-3 transition hover:bg-surface-sunken"
-              >
-                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="font-medium text-ink">{message.client_name}</p>
-                    <p className="text-sm text-ink-muted">
-                      {message.context_label || "General message"}
-                    </p>
-                  </div>
-                  <p className="text-sm text-ink">
-                    {message.body.length > 90
-                      ? `${message.body.slice(0, 90)}...`
-                      : message.body}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
       {loading ? (
         <p className={styles.body}>Loading dashboard...</p>
       ) : clientCards.length === 0 ? (
