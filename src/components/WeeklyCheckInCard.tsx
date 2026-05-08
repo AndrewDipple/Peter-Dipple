@@ -46,7 +46,11 @@ export default function WeeklyCheckInCard({
   const [completed, setCompleted] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [ratings, setRatings] = useState<Ratings>(emptyRatings);
+  const [weightKg, setWeightKg] = useState("");
   const [notes, setNotes] = useState("");
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [sideFile, setSideFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
@@ -90,25 +94,86 @@ export default function WeeklyCheckInCard({
   }, [clientId]);
 
   const handleSubmit = async () => {
+    const parsedWeight = Number(weightKg);
+
+    if (!parsedWeight || parsedWeight <= 0) {
+      alert("Please enter your current weight.");
+      return;
+    }
+
+    if (!frontFile || !backFile || !sideFile) {
+      alert("Please upload front, back and side progress photos.");
+      return;
+    }
+
+    if (!notes.trim()) {
+      alert("Please add a short weekly note for Peter.");
+      return;
+    }
+
     setSaving(true);
 
-    const { error } = await supabase.from("client_weekly_check_ins").upsert(
-      {
-        client_id: clientId,
-        week_start: weekStart,
-        energy_level: Number(ratings.energy_level),
-        hunger_level: Number(ratings.hunger_level),
-        motivation_level: Number(ratings.motivation_level),
-        soreness_level: Number(ratings.soreness_level),
-        sleep_quality: Number(ratings.sleep_quality),
-        notes: notes.trim() || null,
-        submitted_at: new Date().toISOString(),
-      },
-      { onConflict: "client_id,week_start" }
-    );
+    try {
+      const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
+        { type: "front", file: frontFile },
+        { type: "back", file: backFile },
+        { type: "side", file: sideFile },
+      ];
 
-    if (error) {
-      alert(`Check-in could not be saved: ${error.message}`);
+      for (const { type, file } of uploads) {
+        const fileExt = file.name.split(".").pop();
+        const filePath = `${clientId}/${weekStart}-${type}-weekly-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("progress-photos")
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { error: photoError } = await supabase.from("progress_photos").insert({
+          client_id: clientId,
+          image_url: filePath,
+          storage_path: filePath,
+          log_date: weekStart,
+          photo_type: type,
+          note: `Weekly check-in ${formatWeekLabel(weekStart)}`,
+        });
+
+        if (photoError) throw photoError;
+      }
+
+      const { error: weightError } = await supabase
+        .from("client_weight_logs")
+        .insert({
+          client_id: clientId,
+          weight_kg: parsedWeight,
+          log_date: weekStart,
+          note: `Weekly check-in ${formatWeekLabel(weekStart)}`,
+        });
+
+      if (weightError) throw weightError;
+
+      const { error } = await supabase.from("client_weekly_check_ins").upsert(
+        {
+          client_id: clientId,
+          week_start: weekStart,
+          weight_kg: parsedWeight,
+          photos_uploaded: true,
+          energy_level: Number(ratings.energy_level),
+          hunger_level: Number(ratings.hunger_level),
+          motivation_level: Number(ratings.motivation_level),
+          soreness_level: Number(ratings.soreness_level),
+          sleep_quality: Number(ratings.sleep_quality),
+          notes: notes.trim(),
+          submitted_at: new Date().toISOString(),
+        },
+        { onConflict: "client_id,week_start" }
+      );
+
+      if (error) throw error;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      alert(`Check-in could not be saved: ${message}`);
       setSaving(false);
       return;
     }
@@ -120,6 +185,9 @@ export default function WeeklyCheckInCard({
       `weekly_check_in_${weekStart}`,
       "Submitted weekly check-in"
     );
+    setFrontFile(null);
+    setBackFile(null);
+    setSideFile(null);
     setSaving(false);
   };
 
@@ -130,6 +198,13 @@ export default function WeeklyCheckInCard({
       companionView.path.default_name ??
       companionView.path.name
     : null;
+  const parsedWeight = Number(weightKg);
+  const requirements = [
+    { label: "Ratings", complete: true },
+    { label: "Current weight", complete: Boolean(parsedWeight && parsedWeight > 0) },
+    { label: "Front, back and side photos", complete: Boolean(frontFile && backFile && sideFile) },
+    { label: "Weekly note", complete: notes.trim().length > 0 },
+  ];
 
   const content = (
     <div className={styles.card}>
@@ -138,7 +213,7 @@ export default function WeeklyCheckInCard({
           <p className="text-sm font-semibold uppercase tracking-wide text-gold">
             Weekly Check-In
           </p>
-          <h2 className={`${styles.h2} mt-1`}>How are you getting on?</h2>
+          <h2 className={`${styles.h2} mt-1`}>Weekly progress check</h2>
           <p className="mt-1 text-sm text-ink-muted">{formatWeekLabel(weekStart)}</p>
         </div>
         {presentation === "modal" && (
@@ -178,6 +253,29 @@ export default function WeeklyCheckInCard({
         </div>
       </div>
 
+      <div className="mt-4 rounded-md border border-border-subtle bg-surface-sunken p-3">
+        <p className="text-sm font-semibold text-ink">Required this week</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {requirements.map((requirement) => (
+            <div
+              key={requirement.label}
+              className="flex items-center gap-2 text-sm text-ink-muted"
+            >
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                  requirement.complete
+                    ? "bg-emerald text-white"
+                    : "border border-border-subtle bg-surface-raised text-ink-muted"
+                }`}
+              >
+                {requirement.complete ? "✓" : ""}
+              </span>
+              <span>{requirement.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-4 grid gap-3 md:grid-cols-5">
         {ratingFields.map((field) => (
           <div key={field.key}>
@@ -201,7 +299,58 @@ export default function WeeklyCheckInCard({
 
       <div className="mt-4">
         <label className="text-sm font-medium text-ink">
-          Anything your trainer should know?
+          Current weight (kg)
+        </label>
+        <input
+          type="number"
+          step="0.1"
+          min="1"
+          value={weightKg}
+          onChange={(event) => setWeightKg(event.target.value)}
+          className={styles.input}
+          placeholder="e.g. 82.5"
+        />
+      </div>
+
+      <div className="mt-4">
+        <p className="text-sm font-medium text-ink">Progress photos</p>
+        <p className="mt-1 text-xs text-ink-muted">
+          Upload front, back and side photos for this week.
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div>
+            <label className="text-sm font-medium text-ink">Front</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setFrontFile(event.target.files?.[0] ?? null)}
+              className={`${styles.input} pt-2`}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink">Back</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setBackFile(event.target.files?.[0] ?? null)}
+              className={`${styles.input} pt-2`}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink">Side</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setSideFile(event.target.files?.[0] ?? null)}
+              className={`${styles.input} pt-2`}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="text-sm font-medium text-ink">
+          How has this week felt?
         </label>
         <textarea
           value={notes}

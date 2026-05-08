@@ -119,6 +119,9 @@ export default function ClientOnboardingPage() {
   const [trainingDays, setTrainingDays] = useState("");
   const [activityLevel, setActivityLevel] = useState("");
   const [workoutLocation, setWorkoutLocation] = useState("");
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [sideFile, setSideFile] = useState<File | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -312,7 +315,10 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
       !weightKg ||
       !trainingDays ||
       !activityLevel ||
-      !workoutLocation
+      !workoutLocation ||
+      !frontFile ||
+      !backFile ||
+      !sideFile
     ) {
       alert("Please complete all onboarding questions.");
       return;
@@ -345,6 +351,42 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
     const calorieTarget = roundToNearest250(tdee);
 
     setSubmitting(true);
+    const today = new Date().toISOString().split("T")[0];
+
+    try {
+      const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
+        { type: "front", file: frontFile },
+        { type: "back", file: backFile },
+        { type: "side", file: sideFile },
+      ];
+
+      for (const { type, file } of uploads) {
+        const fileExt = file.name.split(".").pop();
+        const filePath = `${client.id}/${today}-${type}-onboarding-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("progress-photos")
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { error: photoError } = await supabase.from("progress_photos").insert({
+          client_id: client.id,
+          image_url: filePath,
+          storage_path: filePath,
+          log_date: today,
+          photo_type: type,
+          note: "Initial progress photos (onboarding)",
+        });
+
+        if (photoError) throw photoError;
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      alert(`Could not upload onboarding photos: ${message}`);
+      setSubmitting(false);
+      return;
+    }
 
     const { error: clientUpdateError } = await supabase
       .from("clients")
@@ -371,7 +413,6 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
     }
 // Record the onboarding weight as the first entry in the weight log timeline
 // so it appears on stats graphs.
-const today = new Date().toISOString().split("T")[0];
 await supabase.from("client_weight_logs").insert([
   {
     client_id: client.id,
@@ -543,6 +584,58 @@ await supabase.from("client_weight_logs").insert([
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-border-subtle pt-6">
+                <h3 className="font-semibold text-ink">Starting progress photos</h3>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Upload front, back and side photos so Peter has a starting
+                  point for your coaching journey.
+                </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Front photo
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) =>
+                        setFrontFile(event.target.files?.[0] ?? null)
+                      }
+                      className={`${styles.input} pt-2`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Back photo
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) =>
+                        setBackFile(event.target.files?.[0] ?? null)
+                      }
+                      className={`${styles.input} pt-2`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-ink">
+                      Side photo
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) =>
+                        setSideFile(event.target.files?.[0] ?? null)
+                      }
+                      className={`${styles.input} pt-2`}
+                    />
+                  </div>
                 </div>
               </div>
 
