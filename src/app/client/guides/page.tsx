@@ -35,7 +35,6 @@ export default function ClientGuidesPage() {
               {activeGuide.durationLabel}
             </p>
             <h2 className={`${styles.h2} mt-1`}>{activeGuide.title}</h2>
-            <p className="mt-2 text-sm text-ink-muted">{activeGuide.description}</p>
           </div>
         </div>
 
@@ -76,7 +75,6 @@ export default function ClientGuidesPage() {
                 {guide.durationLabel}
               </p>
               <h3 className="mt-1 text-lg font-semibold text-ink">{guide.title}</h3>
-              <p className="mt-2 text-sm text-ink-muted">{guide.description}</p>
             </Link>
           );
         })}

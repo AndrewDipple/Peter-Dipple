@@ -87,37 +87,35 @@ export default function AppShell({ userType, children }: Props) {
 
     if (!user) return;
 
-    // Clients have their display data on the clients table.
-    // Trainers and admins have it on profiles.
-    if (isStaff(userType)) {
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("full_name, avatar_url")
-        .eq("id", user.id)
-        .maybeSingle();
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("full_name, avatar_url")
+      .eq("id", user.id)
+      .maybeSingle();
 
-      if (profileData?.full_name) {
-        setDisplayName(profileData.full_name);
-        setAvatarUrl(profileData.avatar_url);
-        return;
-      }
-    } else {
-      const { data: clientData } = await supabase
-        .from("clients")
-        .select("full_name, avatar_url")
-        .eq("profile_id", user.id)
-        .maybeSingle();
+    const { data: clientData } = await supabase
+      .from("clients")
+      .select("full_name, avatar_url")
+      .eq("profile_id", user.id)
+      .maybeSingle();
 
-      if (clientData?.full_name) {
-        setDisplayName(clientData.full_name);
-        setAvatarUrl(clientData.avatar_url);
-        return;
-      }
+    const name = isStaff(userType)
+      ? profileData?.full_name || clientData?.full_name
+      : clientData?.full_name || profileData?.full_name;
+    const avatar = isStaff(userType)
+      ? profileData?.avatar_url || clientData?.avatar_url
+      : clientData?.avatar_url || profileData?.avatar_url;
+
+    if (name) {
+      setDisplayName(name);
+      setAvatarUrl(avatar ?? null);
+      return;
     }
 
     // Fallback: use the email prefix if we can't find a name.
     if (user.email) {
       setDisplayName(user.email.split("@")[0]);
+      setAvatarUrl(null);
     }
   }, [userType]);
 
