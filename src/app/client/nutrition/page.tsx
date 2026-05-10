@@ -9,6 +9,7 @@ import { updateStreak } from "@/lib/streaks";
 import { awardBondXp } from "@/lib/companions";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
+import GuideLink from "@/components/GuideLink";
 import {
   todayStr,
   addDays,
@@ -444,7 +445,10 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
 
   return (
     <>
-      <h1 className={styles.display}>Nutrition</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className={styles.display}>Nutrition</h1>
+        <GuideLink guide="nutrition" label="Watch Peter's nutrition guide" />
+      </div>
 
       {/* Date selector */}
       <div className={`${styles.card} mt-6 bg-surface-sunken`}>

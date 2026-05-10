@@ -16,6 +16,7 @@ import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
+import GuideLink from "@/components/GuideLink";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
 import {
   createOfflineId,
@@ -1438,7 +1439,10 @@ export default function ClientWorkoutPage() {
 
   return (
     <>
-      <h1 className={styles.display}>Workout</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className={styles.display}>Workout</h1>
+        <GuideLink guide="workouts" label="Watch Peter's workout guide" />
+      </div>
 
       {(isBrowserOffline || offlineQueueCount > 0 || syncingOfflineQueue) && (
         <div className="mt-4 rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm text-ink">

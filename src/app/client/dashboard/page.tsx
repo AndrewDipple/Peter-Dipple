@@ -12,6 +12,7 @@ import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
 import WeeklyCheckInCard from "@/components/WeeklyCheckInCard";
+import GuideLink from "@/components/GuideLink";
 import { hasAcceptedCurrentLegal } from "@/lib/legal";
 import {
   getActiveCompanionView,
@@ -797,6 +798,9 @@ useEffect(() => {
                 Welcome, {client.full_name}
               </h2>
               <p className={`mt-2 ${styles.body}`}>Here&apos;s your progress for today.</p>
+              <div className="mt-4">
+                <GuideLink guide="welcome" label="Watch Peter's welcome guide" />
+              </div>
 
 {(clientProgram?.current_week ?? 0) > 0 && (
                     <p className="mt-2 text-sm text-ink-muted">

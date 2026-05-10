@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProgressPhotoPath, withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { styles } from "@/lib/design";
 import { awardBondXp } from "@/lib/companions";
+import GuideLink from "@/components/GuideLink";
 import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Sparkles, Weight } from "lucide-react";
 import { todayStr } from "@/lib/dates"
 import {
@@ -580,7 +581,10 @@ const handleUploadPhotos = async () => {
 
   return (
     <>
-      <h1 className={styles.display}>My Stats</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className={styles.display}>My Stats</h1>
+        <GuideLink guide="photo-uploads" label="Watch Peter's photo guide" />
+      </div>
 
       {loading ? (
         <p className={styles.body}>Loading stats...</p>

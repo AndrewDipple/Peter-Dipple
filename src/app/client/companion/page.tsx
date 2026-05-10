@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import GuideLink from "@/components/GuideLink";
 import {
   awardBondXp,
   chooseCompanion,
@@ -381,7 +382,10 @@ export default function CompanionPage() {
         </button>
       </div>
 
-      <h1 className={styles.display}>Companion</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className={styles.display}>Companion</h1>
+        <GuideLink guide="companions" label="Watch Peter's companion guide" />
+      </div>
 
       {choosingPathId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">

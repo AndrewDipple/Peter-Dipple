@@ -17,6 +17,7 @@ import {
   Settings,
   Bell,
   Shield,
+  PlayCircle,
 } from "lucide-react";
 import Logo from "./Logo";
 import CompanionEvolutionCelebration, {
@@ -37,6 +38,7 @@ const trainerNav: NavItem[] = [
   { href: "/trainer/clients", label: "Clients", icon: Users },
   { href: "/recipes", label: "Recipes", icon: ChefHat },
   { href: "/trainer/program-templates", label: "Programmes", icon: ClipboardList },
+  { href: "/trainer/exercises/new", label: "Exercises", icon: Dumbbell },
   { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
@@ -236,6 +238,11 @@ export default function AppShell({ userType, children }: Props) {
     router.push("/messages");
   };
 
+  const handleOpenGuides = () => {
+    setMenuOpen(false);
+    router.push("/client/guides");
+  };
+
   const handleOpenAdmin = () => {
     setMenuOpen(false);
     router.push("/admin");
@@ -378,6 +385,17 @@ export default function AppShell({ userType, children }: Props) {
                   <MessageSquare size={16} />
                   Messages
                 </button>
+
+                {!isStaff(userType) && (
+                  <button
+                    type="button"
+                    onClick={handleOpenGuides}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                  >
+                    <PlayCircle size={16} />
+                    Peter&apos;s Guides
+                  </button>
+                )}
 
                 <button
                   type="button"
