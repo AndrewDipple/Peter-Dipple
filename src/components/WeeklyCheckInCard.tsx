@@ -15,6 +15,7 @@ import { X } from "lucide-react";
 type WeeklyCheckInCardProps = {
   clientId: string;
   weekStart: string;
+  onboardingCompletedAt?: string | null;
   presentation?: "card" | "modal";
 };
 
@@ -31,16 +32,57 @@ type RatingKey = (typeof ratingFields)[number]["key"];
 type Ratings = Record<RatingKey, string>;
 
 const emptyRatings: Ratings = {
-  energy_level: "3",
-  hunger_level: "3",
-  motivation_level: "3",
-  soreness_level: "3",
-  sleep_quality: "3",
+  energy_level: "",
+  hunger_level: "",
+  motivation_level: "",
+  soreness_level: "",
+  sleep_quality: "",
+};
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+const getNextMonday = (date: Date) => {
+  const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = result.getUTCDay();
+  const daysUntilMonday = ((8 - day) % 7) || 7;
+  result.setUTCDate(result.getUTCDate() + daysUntilMonday);
+  return result;
+};
+
+const isPhotoCheckInWeek = (
+  weekStart: string,
+  onboardingCompletedAt: string | null | undefined
+) => {
+  const weekStartDate = new Date(`${weekStart}T00:00:00Z`);
+  const onboardingDate = onboardingCompletedAt
+    ? new Date(onboardingCompletedAt)
+    : null;
+
+  if (
+    Number.isNaN(weekStartDate.getTime()) ||
+    !onboardingDate ||
+    Number.isNaN(onboardingDate.getTime())
+  ) {
+    return false;
+  }
+
+  const cadenceStart = getNextMonday(onboardingDate);
+  const firstPhotoDue = new Date(cadenceStart);
+  firstPhotoDue.setUTCDate(firstPhotoDue.getUTCDate() + 14);
+
+  if (weekStartDate < firstPhotoDue) return false;
+
+  const weeksSinceFirstPhotoDue = Math.floor(
+    (weekStartDate.getTime() - firstPhotoDue.getTime()) / (7 * dayMs)
+  );
+
+  return weeksSinceFirstPhotoDue % 2 === 0;
 };
 
 export default function WeeklyCheckInCard({
   clientId,
   weekStart,
+  onboardingCompletedAt,
   presentation = "card",
 }: WeeklyCheckInCardProps) {
   const [completed, setCompleted] = useState(false);
@@ -95,51 +137,61 @@ export default function WeeklyCheckInCard({
 
   const handleSubmit = async () => {
     const parsedWeight = Number(weightKg);
+    const ratingsComplete = ratingFields.every((field) => ratings[field.key]);
+    const photosComplete = Boolean(frontFile && backFile && sideFile);
+    const photoWeek = isPhotoCheckInWeek(weekStart, onboardingCompletedAt);
+
+    if (!ratingsComplete) {
+      alert("Please select all check-in ratings.");
+      return;
+    }
 
     if (!parsedWeight || parsedWeight <= 0) {
       alert("Please enter your current weight.");
       return;
     }
 
-    if (!frontFile || !backFile || !sideFile) {
+    if (photoWeek && !photosComplete) {
       alert("Please upload front, back and side progress photos.");
       return;
     }
 
-    if (!notes.trim()) {
-      alert("Please add a short weekly note for Peter.");
+    if (!photoWeek && (frontFile || backFile || sideFile) && !photosComplete) {
+      alert("Please upload all three photos, or leave photos blank this week.");
       return;
     }
 
     setSaving(true);
 
     try {
-      const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
-        { type: "front", file: frontFile },
-        { type: "back", file: backFile },
-        { type: "side", file: sideFile },
-      ];
+      if (photosComplete && frontFile && backFile && sideFile) {
+        const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
+          { type: "front", file: frontFile },
+          { type: "back", file: backFile },
+          { type: "side", file: sideFile },
+        ];
 
-      for (const { type, file } of uploads) {
-        const fileExt = file.name.split(".").pop();
-        const filePath = `${clientId}/${weekStart}-${type}-weekly-${Date.now()}.${fileExt}`;
+        for (const { type, file } of uploads) {
+          const fileExt = file.name.split(".").pop();
+          const filePath = `${clientId}/${weekStart}-${type}-weekly-${Date.now()}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from("progress-photos")
-          .upload(filePath, file);
+          const { error: uploadError } = await supabase.storage
+            .from("progress-photos")
+            .upload(filePath, file);
 
-        if (uploadError) throw uploadError;
+          if (uploadError) throw uploadError;
 
-        const { error: photoError } = await supabase.from("progress_photos").insert({
-          client_id: clientId,
-          image_url: filePath,
-          storage_path: filePath,
-          log_date: weekStart,
-          photo_type: type,
-          note: `Weekly check-in ${formatWeekLabel(weekStart)}`,
-        });
+          const { error: photoError } = await supabase.from("progress_photos").insert({
+            client_id: clientId,
+            image_url: filePath,
+            storage_path: filePath,
+            log_date: weekStart,
+            photo_type: type,
+            note: `Weekly check-in ${formatWeekLabel(weekStart)}`,
+          });
 
-        if (photoError) throw photoError;
+          if (photoError) throw photoError;
+        }
       }
 
       const { error: weightError } = await supabase
@@ -158,13 +210,13 @@ export default function WeeklyCheckInCard({
           client_id: clientId,
           week_start: weekStart,
           weight_kg: parsedWeight,
-          photos_uploaded: true,
+          photos_uploaded: photosComplete,
           energy_level: Number(ratings.energy_level),
           hunger_level: Number(ratings.hunger_level),
           motivation_level: Number(ratings.motivation_level),
           soreness_level: Number(ratings.soreness_level),
           sleep_quality: Number(ratings.sleep_quality),
-          notes: notes.trim(),
+          notes: notes.trim() || null,
           submitted_at: new Date().toISOString(),
         },
         { onConflict: "client_id,week_start" }
@@ -199,11 +251,15 @@ export default function WeeklyCheckInCard({
       companionView.path.name
     : null;
   const parsedWeight = Number(weightKg);
+  const ratingsComplete = ratingFields.every((field) => ratings[field.key]);
+  const photosComplete = Boolean(frontFile && backFile && sideFile);
+  const photoWeek = isPhotoCheckInWeek(weekStart, onboardingCompletedAt);
   const requirements = [
-    { label: "Ratings", complete: true },
+    { label: "Ratings", complete: ratingsComplete },
     { label: "Current weight", complete: Boolean(parsedWeight && parsedWeight > 0) },
-    { label: "Front, back and side photos", complete: Boolean(frontFile && backFile && sideFile) },
-    { label: "Weekly note", complete: notes.trim().length > 0 },
+    ...(photoWeek
+      ? [{ label: "Front, back and side photos", complete: photosComplete }]
+      : []),
   ];
 
   const content = (
@@ -254,7 +310,7 @@ export default function WeeklyCheckInCard({
       </div>
 
       <div className="mt-4 rounded-md border border-border-subtle bg-surface-sunken p-3">
-        <p className="text-sm font-semibold text-ink">Required this week</p>
+        <p className="text-sm font-semibold text-ink">Check-in progress</p>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {requirements.map((requirement) => (
             <div
@@ -277,6 +333,9 @@ export default function WeeklyCheckInCard({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <p className="text-xs text-ink-muted md:col-span-5">
+          Score each area from 1 low to 5 high.
+        </p>
         {ratingFields.map((field) => (
           <div key={field.key}>
             <label className="text-sm font-medium text-ink">{field.label}</label>
@@ -287,6 +346,7 @@ export default function WeeklyCheckInCard({
               }
               className={styles.select}
             >
+              <option value="">Select</option>
               <option value="1">1</option>
               <option value="2">2</option>
               <option value="3">3</option>
@@ -315,7 +375,9 @@ export default function WeeklyCheckInCard({
       <div className="mt-4">
         <p className="text-sm font-medium text-ink">Progress photos</p>
         <p className="mt-1 text-xs text-ink-muted">
-          Upload front, back and side photos for this week.
+          {photoWeek
+            ? "Upload front, back and side photos for this fortnightly photo check."
+            : "Photos are optional this week. If you upload them, add front, back and side."}
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div>
@@ -350,7 +412,7 @@ export default function WeeklyCheckInCard({
 
       <div className="mt-4">
         <label className="text-sm font-medium text-ink">
-          How has this week felt?
+          How has this week felt? <span className="text-ink-muted">(optional)</span>
         </label>
         <textarea
           value={notes}

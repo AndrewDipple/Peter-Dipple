@@ -31,6 +31,8 @@ type Client = {
   protein_g: number | null;
   profile_id: string | null;
   onboarding_complete: boolean | null;
+  onboarding_completed_at?: string | null;
+  created_at?: string | null;
   tour_completed_at: string | null;  // NEW
   daily_step_target: number;
   terms_accepted_at?: string | null;
@@ -822,6 +824,9 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
             <WeeklyCheckInCard
               clientId={client.id}
               weekStart={weekStart}
+              onboardingCompletedAt={
+                client.onboarding_completed_at ?? client.created_at ?? null
+              }
               presentation={today === weekStart ? "modal" : "card"}
             />
 

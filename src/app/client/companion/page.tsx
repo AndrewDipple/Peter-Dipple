@@ -243,6 +243,9 @@ export default function CompanionPage() {
     }
   };
 
+  const getPathActionName = (name: string) =>
+    name.replace(/\s+companion$/i, "");
+
   const renderCompanionCard = (
     item: CompanionCollectionItem,
     mode: "starter" | "collection"
@@ -255,6 +258,7 @@ export default function CompanionPage() {
       item.target !== null
         ? `${Math.min(item.progress, item.target)} / ${item.target}`
         : null;
+    const actionName = getPathActionName(item.path.name);
     const typeLabel = getCompanionTypeLabel(item.path.companion_type);
     const typeDescription = getCompanionTypeDescription(item.path.companion_type);
 
@@ -348,8 +352,8 @@ export default function CompanionPage() {
                 {item.companion
                   ? `Switch to ${displayName}`
                   : mode === "starter"
-                  ? `Choose ${item.path.name}`
-                  : `Unlock ${item.path.name}`}
+                  ? `Choose ${actionName}`
+                  : `Unlock ${actionName}`}
               </button>
             )}
 

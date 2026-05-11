@@ -403,6 +403,7 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
         tdee_estimate: Math.round(tdee),
         calorie_target: calorieTarget,
         onboarding_complete: true,
+        onboarding_completed_at: new Date().toISOString(),
       })
       .eq("id", client.id);
 
