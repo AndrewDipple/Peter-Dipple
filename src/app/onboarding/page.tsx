@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
 import { hasAcceptedCurrentLegal } from "@/lib/legal";
+import { getMondayOf } from "@/lib/dates";
 
 type Client = {
   id: string;
@@ -39,6 +40,26 @@ type TemplateExercise = {
   reps: string | null;
   target_weight_kg: number | null;
   sort_order: number | null;
+};
+
+const ratingFields = [
+  { key: "energy_level", label: "Energy" },
+  { key: "hunger_level", label: "Hunger" },
+  { key: "motivation_level", label: "Motivation" },
+  { key: "soreness_level", label: "Soreness" },
+  { key: "sleep_quality", label: "Sleep" },
+] as const;
+
+type RatingKey = (typeof ratingFields)[number]["key"];
+
+type Ratings = Record<RatingKey, string>;
+
+const emptyRatings: Ratings = {
+  energy_level: "",
+  hunger_level: "",
+  motivation_level: "",
+  soreness_level: "",
+  sleep_quality: "",
 };
 
 const FALLBACK_DAYS = [3, 4, 5];
@@ -119,6 +140,7 @@ export default function ClientOnboardingPage() {
   const [trainingDays, setTrainingDays] = useState("");
   const [activityLevel, setActivityLevel] = useState("");
   const [workoutLocation, setWorkoutLocation] = useState("");
+  const [ratings, setRatings] = useState<Ratings>(emptyRatings);
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
   const [sideFile, setSideFile] = useState<File | null>(null);
@@ -316,6 +338,7 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
       !trainingDays ||
       !activityLevel ||
       !workoutLocation ||
+      !ratingFields.every((field) => ratings[field.key]) ||
       !frontFile ||
       !backFile ||
       !sideFile
@@ -352,6 +375,7 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
 
     setSubmitting(true);
     const today = new Date().toISOString().split("T")[0];
+    const weekStart = getMondayOf(today);
 
     try {
       const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
@@ -422,6 +446,29 @@ await supabase.from("client_weight_logs").insert([
     note: "Initial weight (onboarding)",
   },
 ]);
+
+const { error: baselineCheckInError } = await supabase.from("client_weekly_check_ins").upsert(
+  {
+    client_id: client.id,
+    week_start: weekStart,
+    weight_kg: weightNumber,
+    photos_uploaded: true,
+    energy_level: Number(ratings.energy_level),
+    hunger_level: Number(ratings.hunger_level),
+    motivation_level: Number(ratings.motivation_level),
+    soreness_level: Number(ratings.soreness_level),
+    sleep_quality: Number(ratings.sleep_quality),
+    notes: "Initial check-in values from onboarding",
+    submitted_at: new Date().toISOString(),
+  },
+  { onConflict: "client_id,week_start" }
+);
+
+if (baselineCheckInError) {
+  alert("Could not save starting check-in values.");
+  setSubmitting(false);
+  return;
+}
 
     try {
       await assignTemplateToClient(client.id, selectedTemplate.id);
@@ -585,6 +632,40 @@ await supabase.from("client_weight_logs").insert([
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              <div className="mt-6 border-t border-border-subtle pt-6">
+                <h3 className="font-semibold text-ink">Starting check-in values</h3>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Score each area from 1 low to 5 high so Peter has a baseline.
+                </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-5">
+                  {ratingFields.map((field) => (
+                    <div key={field.key}>
+                      <label className="text-sm font-medium text-ink">
+                        {field.label}
+                      </label>
+                      <select
+                        value={ratings[field.key]}
+                        onChange={(event) =>
+                          setRatings((prev) => ({
+                            ...prev,
+                            [field.key]: event.target.value,
+                          }))
+                        }
+                        className={styles.input}
+                      >
+                        <option value="">Select</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                      </select>
+                    </div>
+                  ))}
                 </div>
               </div>
 

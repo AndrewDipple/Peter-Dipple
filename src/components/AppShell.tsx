@@ -25,6 +25,7 @@ import CompanionEvolutionCelebration, {
 } from "./CompanionEvolutionCelebration";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Role, isAdmin, isStaff } from "@/lib/roles";
+import { addDays, getMondayOf, todayStr } from "@/lib/dates";
 
 type NavItem = {
   href: string;
@@ -59,6 +60,16 @@ type Props = {
   children: React.ReactNode;
 };
 
+const getFirstPhotoReminderWeek = (weekStart: string, onboardingCompletedAt?: string | null) => {
+  if (!onboardingCompletedAt) return weekStart;
+
+  const onboardingDate = onboardingCompletedAt.slice(0, 10);
+  const onboardingWeekStart = getMondayOf(onboardingDate);
+  const firstFullWeekStart = addDays(onboardingWeekStart, 7);
+
+  return addDays(firstFullWeekStart, 7);
+};
+
 export default function AppShell({ userType, children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -75,6 +86,7 @@ export default function AppShell({ userType, children }: Props) {
   const [feedbackDescription, setFeedbackDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  const [hasStatsPhotoReminder, setHasStatsPhotoReminder] = useState(false);
   const [companionEvolution, setCompanionEvolution] =
     useState<CompanionEvolutionCelebrationData | null>(null);
 
@@ -196,6 +208,65 @@ export default function AppShell({ userType, children }: Props) {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  useEffect(() => {
+    const checkStatsPhotoReminder = async () => {
+      if (isStaff(userType)) {
+        setHasStatsPhotoReminder(false);
+        return;
+      }
+
+      const today = todayStr();
+      const weekStart = getMondayOf(today);
+
+      if (today !== weekStart) {
+        setHasStatsPhotoReminder(false);
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setHasStatsPhotoReminder(false);
+        return;
+      }
+
+      const { data: clientData } = await supabase
+        .from("clients")
+        .select("id, onboarding_completed_at, created_at")
+        .eq("profile_id", user.id)
+        .maybeSingle();
+
+      if (!clientData) {
+        setHasStatsPhotoReminder(false);
+        return;
+      }
+
+      const firstReminderWeek = getFirstPhotoReminderWeek(
+        weekStart,
+        clientData.onboarding_completed_at ?? clientData.created_at
+      );
+
+      if (weekStart < firstReminderWeek) {
+        setHasStatsPhotoReminder(false);
+        return;
+      }
+
+      const { data: photos, error } = await supabase
+        .from("progress_photos")
+        .select("id")
+        .eq("client_id", clientData.id)
+        .gte("log_date", weekStart)
+        .lte("log_date", addDays(weekStart, 6))
+        .limit(1);
+
+      setHasStatsPhotoReminder(!error && (!photos || photos.length === 0));
+    };
+
+    checkStatsPhotoReminder();
+  }, [userType]);
 
   const initials =
     displayName
@@ -327,6 +398,11 @@ export default function AppShell({ userType, children }: Props) {
                 >
                   <Icon size={20} className="md:hidden" />
                   <span className="hidden md:inline">{item.label}</span>
+                  {!isStaff(userType) &&
+                    item.href === "/client/stats" &&
+                    hasStatsPhotoReminder && (
+                      <span className="absolute right-0 top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+                    )}
                   {active && <span className="absolute -bottom-4.5 left-0 right-0 h-0.5 bg-gold" />}
                 </Link>
               );

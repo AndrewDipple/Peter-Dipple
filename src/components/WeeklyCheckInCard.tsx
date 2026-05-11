@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { formatWeekLabel } from "@/lib/dates";
+import { addDays, formatWeekLabel, getMondayOf } from "@/lib/dates";
 import {
   awardBondXp,
   getActiveCompanionView,
@@ -39,44 +39,17 @@ const emptyRatings: Ratings = {
   sleep_quality: "",
 };
 
-const dayMs = 24 * 60 * 60 * 1000;
-
-const getNextMonday = (date: Date) => {
-  const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const day = result.getUTCDay();
-  const daysUntilMonday = ((8 - day) % 7) || 7;
-  result.setUTCDate(result.getUTCDate() + daysUntilMonday);
-  return result;
-};
-
-const isPhotoCheckInWeek = (
+const getFirstCheckInWeek = (
   weekStart: string,
   onboardingCompletedAt: string | null | undefined
 ) => {
-  const weekStartDate = new Date(`${weekStart}T00:00:00Z`);
-  const onboardingDate = onboardingCompletedAt
-    ? new Date(onboardingCompletedAt)
-    : null;
+  if (!onboardingCompletedAt) return weekStart;
 
-  if (
-    Number.isNaN(weekStartDate.getTime()) ||
-    !onboardingDate ||
-    Number.isNaN(onboardingDate.getTime())
-  ) {
-    return false;
-  }
+  const onboardingDate = onboardingCompletedAt.slice(0, 10);
+  const onboardingWeekStart = getMondayOf(onboardingDate);
+  const firstFullWeekStart = addDays(onboardingWeekStart, 7);
 
-  const cadenceStart = getNextMonday(onboardingDate);
-  const firstPhotoDue = new Date(cadenceStart);
-  firstPhotoDue.setUTCDate(firstPhotoDue.getUTCDate() + 14);
-
-  if (weekStartDate < firstPhotoDue) return false;
-
-  const weeksSinceFirstPhotoDue = Math.floor(
-    (weekStartDate.getTime() - firstPhotoDue.getTime()) / (7 * dayMs)
-  );
-
-  return weeksSinceFirstPhotoDue % 2 === 0;
+  return addDays(firstFullWeekStart, 7);
 };
 
 export default function WeeklyCheckInCard({
@@ -90,9 +63,6 @@ export default function WeeklyCheckInCard({
   const [ratings, setRatings] = useState<Ratings>(emptyRatings);
   const [weightKg, setWeightKg] = useState("");
   const [notes, setNotes] = useState("");
-  const [frontFile, setFrontFile] = useState<File | null>(null);
-  const [backFile, setBackFile] = useState<File | null>(null);
-  const [sideFile, setSideFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
@@ -138,8 +108,6 @@ export default function WeeklyCheckInCard({
   const handleSubmit = async () => {
     const parsedWeight = Number(weightKg);
     const ratingsComplete = ratingFields.every((field) => ratings[field.key]);
-    const photosComplete = Boolean(frontFile && backFile && sideFile);
-    const photoWeek = isPhotoCheckInWeek(weekStart, onboardingCompletedAt);
 
     if (!ratingsComplete) {
       alert("Please select all check-in ratings.");
@@ -151,49 +119,9 @@ export default function WeeklyCheckInCard({
       return;
     }
 
-    if (photoWeek && !photosComplete) {
-      alert("Please upload front, back and side progress photos.");
-      return;
-    }
-
-    if (!photoWeek && (frontFile || backFile || sideFile) && !photosComplete) {
-      alert("Please upload all three photos, or leave photos blank this week.");
-      return;
-    }
-
     setSaving(true);
 
     try {
-      if (photosComplete && frontFile && backFile && sideFile) {
-        const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [
-          { type: "front", file: frontFile },
-          { type: "back", file: backFile },
-          { type: "side", file: sideFile },
-        ];
-
-        for (const { type, file } of uploads) {
-          const fileExt = file.name.split(".").pop();
-          const filePath = `${clientId}/${weekStart}-${type}-weekly-${Date.now()}.${fileExt}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from("progress-photos")
-            .upload(filePath, file);
-
-          if (uploadError) throw uploadError;
-
-          const { error: photoError } = await supabase.from("progress_photos").insert({
-            client_id: clientId,
-            image_url: filePath,
-            storage_path: filePath,
-            log_date: weekStart,
-            photo_type: type,
-            note: `Weekly check-in ${formatWeekLabel(weekStart)}`,
-          });
-
-          if (photoError) throw photoError;
-        }
-      }
-
       const { error: weightError } = await supabase
         .from("client_weight_logs")
         .insert({
@@ -210,7 +138,7 @@ export default function WeeklyCheckInCard({
           client_id: clientId,
           week_start: weekStart,
           weight_kg: parsedWeight,
-          photos_uploaded: photosComplete,
+          photos_uploaded: false,
           energy_level: Number(ratings.energy_level),
           hunger_level: Number(ratings.hunger_level),
           motivation_level: Number(ratings.motivation_level),
@@ -237,13 +165,12 @@ export default function WeeklyCheckInCard({
       `weekly_check_in_${weekStart}`,
       "Submitted weekly check-in"
     );
-    setFrontFile(null);
-    setBackFile(null);
-    setSideFile(null);
     setSaving(false);
   };
 
-  if (loading || completed || dismissed) return null;
+  const firstCheckInWeek = getFirstCheckInWeek(weekStart, onboardingCompletedAt);
+
+  if (loading || completed || dismissed || weekStart < firstCheckInWeek) return null;
 
   const companionDisplayName = companionView
     ? companionView.companion.custom_name ??
@@ -252,18 +179,17 @@ export default function WeeklyCheckInCard({
     : null;
   const parsedWeight = Number(weightKg);
   const ratingsComplete = ratingFields.every((field) => ratings[field.key]);
-  const photosComplete = Boolean(frontFile && backFile && sideFile);
-  const photoWeek = isPhotoCheckInWeek(weekStart, onboardingCompletedAt);
   const requirements = [
     { label: "Ratings", complete: ratingsComplete },
     { label: "Current weight", complete: Boolean(parsedWeight && parsedWeight > 0) },
-    ...(photoWeek
-      ? [{ label: "Front, back and side photos", complete: photosComplete }]
-      : []),
   ];
 
   const content = (
-    <div className={presentation === "modal" ? styles.modalCard : styles.card}>
+    <div
+      className={`${
+        presentation === "modal" ? styles.modalCard : styles.card
+      } ${presentation === "modal" ? "max-h-[calc(100vh-2rem)] overflow-y-auto" : ""}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-gold">
@@ -373,44 +299,6 @@ export default function WeeklyCheckInCard({
       </div>
 
       <div className="mt-4">
-        <p className="text-sm font-medium text-ink">Progress photos</p>
-        <p className="mt-1 text-xs text-ink-muted">
-          {photoWeek
-            ? "Upload front, back and side photos for this fortnightly photo check."
-            : "Photos are optional this week. If you upload them, add front, back and side."}
-        </p>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div>
-            <label className="text-sm font-medium text-ink">Front</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => setFrontFile(event.target.files?.[0] ?? null)}
-              className={`${styles.input} pt-2`}
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-ink">Back</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => setBackFile(event.target.files?.[0] ?? null)}
-              className={`${styles.input} pt-2`}
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-ink">Side</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(event) => setSideFile(event.target.files?.[0] ?? null)}
-              className={`${styles.input} pt-2`}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4">
         <label className="text-sm font-medium text-ink">
           How has this week felt? <span className="text-ink-muted">(optional)</span>
         </label>
@@ -436,8 +324,8 @@ export default function WeeklyCheckInCard({
 
   if (presentation === "modal") {
     return (
-      <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/60 p-4">
-        <div className="w-full max-w-3xl">{content}</div>
+      <div className="fixed inset-0 z-[180] flex items-start justify-center overflow-y-auto bg-black/60 p-4">
+        <div className="my-4 w-full max-w-3xl">{content}</div>
       </div>
     );
   }

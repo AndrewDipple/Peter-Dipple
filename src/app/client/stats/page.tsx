@@ -89,6 +89,36 @@ type TotalVolumeData = {
   total_reps: number;
 };
 
+type PhotoFileFieldProps = {
+  id: string;
+  label: string;
+  file: File | null;
+  onChange: (file: File | null) => void;
+};
+
+function PhotoFileField({ id, label, file, onChange }: PhotoFileFieldProps) {
+  return (
+    <div className="min-w-0">
+      <label className="text-sm font-medium text-ink" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type="file"
+        accept="image/*"
+        onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+        className="sr-only"
+      />
+      <label
+        htmlFor={id}
+        className="mt-1 block min-h-10 w-full cursor-pointer truncate rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-sm text-ink transition hover:bg-surface-sunken"
+      >
+        {file ? file.name : "Choose photo"}
+      </label>
+    </div>
+  );
+}
+
 export default function ClientStatsPage() {
   const [client, setClient] = useState<Client | null>(null);
 
@@ -602,9 +632,9 @@ const handleUploadPhotos = async () => {
             {loadingPRs ? (
               <p className={styles.body}>Loading personal bests...</p>
             ) : (
-              <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-3">
                 {/* Total Weight Lifted */}
-                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
+                <div className="min-w-0 rounded-xl border border-border-subtle bg-surface-raised p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <Weight className="text-gold" size={20} />
                     <h3 className="text-sm font-semibold text-ink">Total Volume</h3>
@@ -643,7 +673,7 @@ const handleUploadPhotos = async () => {
 {/* Companion / Motivation */}
 <Link
   href="/client/companion"
-  className="block rounded-xl border border-border-subtle bg-surface-raised p-4 transition hover:border-emerald"
+  className="block min-w-0 rounded-xl border border-border-subtle bg-surface-raised p-4 transition hover:border-emerald"
 >
   <div className="flex items-center gap-2 mb-3">
     <Sparkles className="text-emerald" size={20} />
@@ -656,13 +686,15 @@ const handleUploadPhotos = async () => {
     <div className="space-y-3">
       <div className="flex flex-col items-center gap-2">
         {companionView.currentForm.image_url ? (
-          <img
-            src={companionView.currentForm.image_url}
-            alt={companionView.currentForm.name}
-            className="h-75 w-75 rounded-lg border border-border-subtle object-cover"
-          />
+          <div className="w-full max-w-40">
+            <img
+              src={companionView.currentForm.image_url}
+              alt={companionView.currentForm.name}
+              className="aspect-square w-full rounded-lg border border-border-subtle object-cover"
+            />
+          </div>
         ) : (
-          <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-border-subtle bg-surface-sunken text-2xl">
+          <div className="flex aspect-square w-full max-w-40 items-center justify-center rounded-lg border border-border-subtle bg-surface-sunken text-2xl">
             ?
           </div>
         )}
@@ -680,21 +712,21 @@ const handleUploadPhotos = async () => {
 
       {companionLine && (
         <div className="rounded-lg bg-surface-sunken p-3 text-sm italic text-center text-ink">
-          "{companionLine}"
+          &quot;{companionLine}&quot;
         </div>
       )}
     </div>
   ) : (
     <div className="rounded-lg bg-surface-sunken p-4 text-center">
       <p className="text-sm italic text-ink">
-        "Small actions compound. Like leaves, one at a time."
+        &quot;Small actions compound. Like leaves, one at a time.&quot;
       </p>
     </div>
   )}
 </Link>
 
                 {/* Heaviest Lifts */}
-                <div className="rounded-xl border border-border-subtle bg-surface-raised p-4">
+                <div className="min-w-0 rounded-xl border border-border-subtle bg-surface-raised p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <TrendingUp className="text-gold" size={20} />
                     <h3 className="text-sm font-semibold text-ink">Heaviest Lifts</h3>
@@ -966,35 +998,24 @@ const handleUploadPhotos = async () => {
 
             <div className="mt-4 space-y-3">
               <div className="grid gap-3 md:grid-cols-3">
-                <div>
-                  <label className="text-sm font-medium text-ink">Front Photo</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setFrontFile(e.target.files?.[0] || null)}
-                    className={`${styles.input} pt-2`}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-ink">Back Photo</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setBackFile(e.target.files?.[0] || null)}
-                    className={`${styles.input} pt-2`}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-ink">Side Photo</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setSideFile(e.target.files?.[0] || null)}
-                    className={`${styles.input} pt-2`}
-                  />
-                </div>
+                <PhotoFileField
+                  id="front-photo-upload"
+                  label="Front Photo"
+                  file={frontFile}
+                  onChange={setFrontFile}
+                />
+                <PhotoFileField
+                  id="back-photo-upload"
+                  label="Back Photo"
+                  file={backFile}
+                  onChange={setBackFile}
+                />
+                <PhotoFileField
+                  id="side-photo-upload"
+                  label="Side Photo"
+                  file={sideFile}
+                  onChange={setSideFile}
+                />
               </div>
 
               <div className="flex gap-2">
