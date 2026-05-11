@@ -19,6 +19,9 @@ export const styles = {
   /** Default card — white on off-white background, soft shadow, no border */
   card: "rounded-lg bg-surface-raised p-5 shadow-subtle",
 
+  /** Default modal panel: opaque white surface over a dimmed backdrop */
+  modalCard: "rounded-lg bg-white p-5 text-black shadow-lifted",
+
   /** Card that responds to hover (clickable / linked cards) */
   cardInteractive:
     "rounded-lg bg-surface-raised p-5 shadow-subtle transition-all hover:shadow-raised hover:-translate-y-0.5",

@@ -207,7 +207,7 @@ export default function WeeklyCheckInCard({
   ];
 
   const content = (
-    <div className={styles.card}>
+    <div className={presentation === "modal" ? styles.modalCard : styles.card}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-gold">
