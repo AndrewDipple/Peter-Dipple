@@ -5,14 +5,15 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getProgressPhotoPath, withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { styles } from "@/lib/design";
-import { awardBondXp } from "@/lib/companions";
+import { awardBondXp, COMPANION_XP_REWARDS } from "@/lib/companions";
 import GuideLink from "@/components/GuideLink";
-import { ChevronRight, Trash2, Trophy, TrendingUp, Flame, Sparkles, Weight } from "lucide-react";
+import { ChevronRight, Trash2, Trophy, TrendingUp, Sparkles, Weight, X } from "lucide-react";
 import { todayStr } from "@/lib/dates"
 import {
   isCompanionEnabledForClient,
   getActiveCompanionView,
   getRandomLine,
+  personalizeCompanionLine,
   type ActiveCompanionView,
 } from "@/lib/companions";
 
@@ -77,16 +78,22 @@ type ExercisePR = {
   reps: number;
 };
 
-type StreakData = {
-  current_streak: number;
-  longest_streak: number;
-  last_workout_date: string | null;
+type PersonalBestInsight = {
+  title: string;
+  value: string;
+  detail: string;
+  chartData?: Array<{
+    label: string;
+    value: number;
+  }>;
+  chartLabel?: string;
 };
 
-type TotalVolumeData = {
-  total_weight_kg: number;
-  total_sets: number;
-  total_reps: number;
+type CompletedSetLog = {
+  actual_weight_kg: number;
+  actual_reps: number;
+  created_at: string;
+  client_program_day_exercise_id: string;
 };
 
 type PhotoFileFieldProps = {
@@ -135,6 +142,11 @@ export default function ClientStatsPage() {
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [showAllWeeks, setShowAllWeeks] = useState(false);
   const [deletingWeek, setDeletingWeek] = useState<string | null>(null);
+  const [enlargedPhoto, setEnlargedPhoto] = useState<{
+    photo: ProgressPhoto;
+    label: string;
+    weekNumber: number;
+  } | null>(null);
 
   const [latestMeasurements, setLatestMeasurements] = useState<MeasurementLog | null>(null);
   const [measurementLogs, setMeasurementLogs] = useState<MeasurementLog[]>([]);
@@ -151,8 +163,8 @@ export default function ClientStatsPage() {
 
   // Personal Bests State
   const [exercisePRs, setExercisePRs] = useState<ExercisePR[]>([]);
-  const [streakData, setStreakData] = useState<StreakData | null>(null);
-  const [totalVolume, setTotalVolume] = useState<TotalVolumeData | null>(null);
+  const [personalBestInsights, setPersonalBestInsights] = useState<PersonalBestInsight[]>([]);
+  const [activeInsightIndex, setActiveInsightIndex] = useState(0);
   const [loadingPRs, setLoadingPRs] = useState(false);
 
   const [loading, setLoading] = useState(true);
@@ -162,6 +174,14 @@ const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(n
 const [companionLine, setCompanionLine] = useState<string | null>(null);
 
 const today = todayStr()
+
+  const getPhotoUrl = (photo: ProgressPhoto) =>
+    photo.signed_url ?? photo.image_url;
+
+  const buildSparklineData = (points: Map<string, number>) =>
+    [...points.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([label, value]) => ({ label, value }));
 
   const weightChartData = [...weightLogs]
     .sort((a, b) => a.log_date.localeCompare(b.log_date))
@@ -217,11 +237,20 @@ const today = todayStr()
 
   const hasMiddleWeeks = photoWeeks.length > 2;
 
+  useEffect(() => {
+    if (personalBestInsights.length <= 1) return;
+
+    const intervalId = window.setInterval(() => {
+      setActiveInsightIndex((index) => (index + 1) % personalBestInsights.length);
+    }, 5500);
+
+    return () => window.clearInterval(intervalId);
+  }, [personalBestInsights.length]);
+
   const loadPersonalBests = async (clientId: string) => {
     setLoadingPRs(true);
 
     try {
-      // Get all set logs with exercise names
       const { data: setLogs, error: setLogsError } = await supabase
         .from("client_program_set_logs")
         .select(`
@@ -233,13 +262,19 @@ const today = todayStr()
         .eq("client_id", clientId)
         .eq("completed", true)
         .not("actual_weight_kg", "is", null)
-        .order("actual_weight_kg", { ascending: false });
+        .not("actual_reps", "is", null)
+        .order("created_at", { ascending: true });
 
       if (setLogsError) throw setLogsError;
 
-      if (setLogs && setLogs.length > 0) {
+      const insights: PersonalBestInsight[] = [];
+      const typedSetLogs = (setLogs ?? []) as CompletedSetLog[];
+
+      if (typedSetLogs.length > 0) {
         // Get exercise names for these logs
-        const exerciseIds = [...new Set(setLogs.map(log => log.client_program_day_exercise_id))];
+        const exerciseIds = [
+          ...new Set(typedSetLogs.map((log) => log.client_program_day_exercise_id)),
+        ];
         
         const { data: exercises, error: exercisesError } = await supabase
           .from("client_program_day_exercises")
@@ -250,21 +285,27 @@ const today = todayStr()
 
         // Create a map of exercise_id to exercise_name
         const exerciseMap = new Map(
-          exercises?.map(ex => [ex.id, ex.exercise_name]) || []
+          exercises?.map((exercise) => [exercise.id, exercise.exercise_name]) || []
         );
+        const namedLogs = typedSetLogs
+          .map((log) => ({
+            ...log,
+            exercise_name: exerciseMap.get(log.client_program_day_exercise_id),
+          }))
+          .filter(
+            (log): log is CompletedSetLog & { exercise_name: string } =>
+              Boolean(log.exercise_name)
+          );
 
         // Group by exercise and find max weight for each
         const prMap = new Map<string, ExercisePR>();
 
-        setLogs.forEach(log => {
-          const exerciseName = exerciseMap.get(log.client_program_day_exercise_id);
-          if (!exerciseName) return;
-
-          const existing = prMap.get(exerciseName);
+        namedLogs.forEach((log) => {
+          const existing = prMap.get(log.exercise_name);
           
           if (!existing || log.actual_weight_kg > existing.max_weight_kg) {
-            prMap.set(exerciseName, {
-              exercise_name: exerciseName,
+            prMap.set(log.exercise_name, {
+              exercise_name: log.exercise_name,
               max_weight_kg: log.actual_weight_kg,
               log_date: log.created_at.split("T")[0],
               reps: log.actual_reps || 0,
@@ -278,62 +319,164 @@ const today = todayStr()
           .slice(0, 5);
 
         setExercisePRs(topPRs);
-      }
 
-      // Get streak data
-      const { data: streaks, error: streaksError } = await supabase
-        .from("client_streaks")
-        .select("*")
-        .eq("client_id", clientId)
-        .eq("streak_type", "workout")
-        .single();
+        const strongestLift = topPRs[0];
+        if (strongestLift) {
+          const strongestLiftTrend = new Map<string, number>();
+          let bestSoFar = 0;
+          namedLogs
+            .filter((log) => log.exercise_name === strongestLift.exercise_name)
+            .forEach((log) => {
+              const date = log.created_at.split("T")[0];
+              bestSoFar = Math.max(bestSoFar, log.actual_weight_kg);
+              strongestLiftTrend.set(date, bestSoFar);
+            });
 
-      if (streaksError && streaksError.code !== "PGRST116") {
-        throw streaksError;
-      }
+          insights.push({
+            title: "Strongest lift",
+            value: `${strongestLift.max_weight_kg}kg`,
+            detail: `${strongestLift.exercise_name}${
+              strongestLift.reps ? ` for ${strongestLift.reps} reps` : ""
+            }`,
+            chartData: buildSparklineData(strongestLiftTrend),
+            chartLabel: "Best weight over time",
+          });
+        }
 
-      if (streaks) {
-        setStreakData({
-          current_streak: streaks.current_streak || 0,
-          longest_streak: streaks.longest_streak || 0,
-          last_workout_date: streaks.last_activity_date,
+        const exerciseCounts = new Map<string, number>();
+        namedLogs.forEach((log) => {
+          exerciseCounts.set(
+            log.exercise_name,
+            (exerciseCounts.get(log.exercise_name) ?? 0) + 1
+          );
         });
+        const mostTrained = [...exerciseCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (mostTrained) {
+          const mostTrainedTrend = new Map<string, number>();
+          let totalSets = 0;
+          namedLogs
+            .filter((log) => log.exercise_name === mostTrained[0])
+            .forEach((log) => {
+              const date = log.created_at.split("T")[0];
+              totalSets += 1;
+              mostTrainedTrend.set(date, totalSets);
+            });
+
+          insights.push({
+            title: "Most trained movement",
+            value: mostTrained[0],
+            detail: `${mostTrained[1].toLocaleString()} completed set${
+              mostTrained[1] === 1 ? "" : "s"
+            }`,
+            chartData: buildSparklineData(mostTrainedTrend),
+            chartLabel: "Sets over time",
+          });
+        }
+
+        const improvements = new Map<string, { first: number; best: number }>();
+        namedLogs.forEach((log) => {
+          const current = improvements.get(log.exercise_name);
+          if (!current) {
+            improvements.set(log.exercise_name, {
+              first: log.actual_weight_kg,
+              best: log.actual_weight_kg,
+            });
+            return;
+          }
+
+          current.best = Math.max(current.best, log.actual_weight_kg);
+        });
+        const mostImproved = [...improvements.entries()]
+          .map(([exercise, values]) => ({
+            exercise,
+            improvement: values.best - values.first,
+          }))
+          .filter((item) => item.improvement > 0)
+          .sort((a, b) => b.improvement - a.improvement)[0];
+        if (mostImproved) {
+          const improvementTrend = new Map<string, number>();
+          namedLogs
+            .filter((log) => log.exercise_name === mostImproved.exercise)
+            .forEach((log) => {
+              const date = log.created_at.split("T")[0];
+              const previous = improvementTrend.get(date) ?? 0;
+              improvementTrend.set(date, Math.max(previous, log.actual_weight_kg));
+            });
+
+          insights.push({
+            title: "Most improved exercise",
+            value: `+${mostImproved.improvement}kg`,
+            detail: mostImproved.exercise,
+            chartData: buildSparklineData(improvementTrend),
+            chartLabel: "Best weight by day",
+          });
+        }
+
+        const bestByExercise = new Map<string, number>();
+        const recentPb = namedLogs.reduce<
+          (CompletedSetLog & { exercise_name: string }) | null
+        >((latest, log) => {
+          const previousBest = bestByExercise.get(log.exercise_name) ?? 0;
+          if (log.actual_weight_kg > previousBest) {
+            bestByExercise.set(log.exercise_name, log.actual_weight_kg);
+            return log;
+          }
+
+          return latest;
+        }, null);
+        if (recentPb) {
+          insights.push({
+            title: "Most recent PB",
+            value: `${recentPb.actual_weight_kg}kg`,
+            detail: `${recentPb.exercise_name} on ${recentPb.created_at.split("T")[0]}`,
+          });
+        }
       } else {
-        setStreakData({
-          current_streak: 0,
-          longest_streak: 0,
-          last_workout_date: null,
-        });
+        setExercisePRs([]);
       }
 
       // Calculate total volume lifted (all completed sets)
-      const { data: allCompletedSets, error: volumeError } = await supabase
-        .from("client_program_set_logs")
-        .select("actual_weight_kg, actual_reps")
-        .eq("client_id", clientId)
-        .eq("completed", true)
-        .not("actual_weight_kg", "is", null)
-        .not("actual_reps", "is", null);
-
-      if (volumeError) {
-        console.error("Error loading volume data:", volumeError);
-      } else if (allCompletedSets && allCompletedSets.length > 0) {
-        const totalWeightLifted = allCompletedSets.reduce((sum, set) => {
+      if (typedSetLogs.length > 0) {
+        const totalWeightLifted = typedSetLogs.reduce((sum, set) => {
           return sum + (set.actual_weight_kg * set.actual_reps);
         }, 0);
+        const volumeByDate = new Map<string, number>();
+        const setsByDate = new Map<string, number>();
 
-        setTotalVolume({
-          total_weight_kg: Math.round(totalWeightLifted),
-          total_sets: allCompletedSets.length,
-          total_reps: allCompletedSets.reduce((sum, set) => sum + set.actual_reps, 0),
+        typedSetLogs.forEach((set) => {
+          const date = set.created_at.split("T")[0];
+          volumeByDate.set(
+            date,
+            (volumeByDate.get(date) ?? 0) + set.actual_weight_kg * set.actual_reps
+          );
+          setsByDate.set(date, (setsByDate.get(date) ?? 0) + 1);
+        });
+
+        insights.unshift({
+          title: "Total volume lifted",
+          value: `${Math.round(totalWeightLifted).toLocaleString()}kg`,
+          detail: `${typedSetLogs.length.toLocaleString()} sets and ${typedSetLogs
+            .reduce((sum, set) => sum + set.actual_reps, 0)
+            .toLocaleString()} reps logged`,
+          chartData: buildSparklineData(volumeByDate),
+          chartLabel: "Volume by day",
+        });
+
+        insights.push({
+          title: "Total completed work",
+          value: `${typedSetLogs.length.toLocaleString()} sets`,
+          detail: `${typedSetLogs
+            .reduce((sum, set) => sum + set.actual_reps, 0)
+            .toLocaleString()} total reps recorded`,
+          chartData: buildSparklineData(setsByDate),
+          chartLabel: "Sets by day",
         });
       } else {
-        setTotalVolume({
-          total_weight_kg: 0,
-          total_sets: 0,
-          total_reps: 0,
-        });
+        setPersonalBestInsights([]);
       }
+
+      setPersonalBestInsights(insights);
+      setActiveInsightIndex(0);
     } catch (error) {
       console.error("Error loading personal bests:", error);
     } finally {
@@ -378,8 +521,12 @@ if (isEnabled) {
   setCompanionView(cv);
 
   if (cv) {
-    const line = await getRandomLine(cv.path.slug, "general");
-    setCompanionLine(line);
+    const line = await getRandomLine(
+      cv.path.slug,
+      "general",
+      cv.currentForm.form_number
+    );
+    setCompanionLine(personalizeCompanionLine(line, cv));
   }
 }
     // Load personal bests
@@ -549,7 +696,7 @@ const handleUploadPhotos = async () => {
     if (isFirstEverUpload) {
       await awardBondXp(
         client.id,
-        150,
+        COMPANION_XP_REWARDS.firstProgressPhotos,
         "first_progress_photos",
         "Uploaded your first set of progress photos"
       );
@@ -609,6 +756,11 @@ const handleUploadPhotos = async () => {
     }
   };
 
+  const activeInsight =
+    personalBestInsights[
+      Math.min(activeInsightIndex, Math.max(0, personalBestInsights.length - 1))
+    ] ?? null;
+
   return (
     <>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -633,37 +785,75 @@ const handleUploadPhotos = async () => {
               <p className={styles.body}>Loading personal bests...</p>
             ) : (
               <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-3">
-                {/* Total Weight Lifted */}
-                <div className="min-w-0 rounded-xl border border-border-subtle bg-surface-raised p-4">
+                {/* Rotating Training Insights */}
+                <div className="flex min-h-80 min-w-0 flex-col rounded-xl border border-border-subtle bg-surface-raised p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <Weight className="text-gold" size={20} />
-                    <h3 className="text-sm font-semibold text-ink">Total Volume</h3>
+                    <h3 className="text-sm font-semibold text-ink">Training Insights</h3>
                   </div>
 
-                  {totalVolume ? (
-                    <div className="space-y-3">
-                      <div className="rounded-lg bg-surface-sunken p-3 text-center">
-                        <p className="text-xs text-ink-muted mb-1">Total Weight Lifted</p>
-                        <p className="text-3xl font-bold text-gold">
-                          {totalVolume.total_weight_kg.toLocaleString()}
+                  {activeInsight ? (
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <div className="flex min-h-52 flex-1 flex-col justify-center rounded-lg bg-surface-sunken p-4 text-center">
+                        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                          {activeInsight.title}
                         </p>
-                        <p className="text-sm text-ink-muted">kg</p>
+                        <p className="mt-2 break-words text-3xl font-bold text-gold">
+                          {activeInsight.value}
+                        </p>
+                        <p className="mt-1 text-sm text-ink-muted">
+                          {activeInsight.detail}
+                        </p>
+                        {activeInsight.chartData &&
+                          activeInsight.chartData.length >= 2 && (
+                            <div className="mt-4 h-16 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart
+                                  data={activeInsight.chartData}
+                                  margin={{ top: 6, right: 4, bottom: 0, left: 4 }}
+                                >
+                                  <Tooltip
+                                    contentStyle={{
+                                      borderRadius: 8,
+                                      borderColor: "#e5e7eb",
+                                      fontSize: 12,
+                                    }}
+                                    formatter={(value) => [
+                                      Number(value).toLocaleString(),
+                                      activeInsight.chartLabel ?? "Value",
+                                    ]}
+                                    labelFormatter={(label) => String(label)}
+                                  />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke="#b88a2e"
+                                    strokeWidth={2}
+                                    dot={false}
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-lg bg-surface-sunken p-2 text-center">
-                          <p className="text-xs text-ink-muted">Sets</p>
-                          <p className="text-lg font-semibold text-ink">
-                            {totalVolume.total_sets.toLocaleString()}
-                          </p>
+                      {personalBestInsights.length > 1 && (
+                        <div className="mt-4 flex h-8 items-center justify-center gap-2">
+                          {personalBestInsights.map((insight, index) => (
+                            <button
+                              key={`${insight.title}-${index}`}
+                              type="button"
+                              onClick={() => setActiveInsightIndex(index)}
+                              className={`h-3 rounded-full border transition-all ${
+                                index === activeInsightIndex
+                                  ? "w-7 border-gold bg-gold"
+                                  : "w-3 border-ink-muted/60 bg-surface hover:border-gold hover:bg-gold/20"
+                              }`}
+                              aria-label={`Show ${insight.title}`}
+                            />
+                          ))}
                         </div>
-                        <div className="rounded-lg bg-surface-sunken p-2 text-center">
-                          <p className="text-xs text-ink-muted">Reps</p>
-                          <p className="text-lg font-semibold text-ink">
-                            {totalVolume.total_reps.toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   ) : (
                     <p className={styles.body}>No workout data yet.</p>
@@ -848,6 +1038,241 @@ const handleUploadPhotos = async () => {
           </div>
 
           <div className={styles.card}>
+            <h2 className={styles.h2}>Progress Photos</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Upload Front, Back, and Side photos together as a weekly set
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-3 md:grid-cols-3">
+                <PhotoFileField
+                  id="front-photo-upload"
+                  label="Front Photo"
+                  file={frontFile}
+                  onChange={setFrontFile}
+                />
+                <PhotoFileField
+                  id="back-photo-upload"
+                  label="Back Photo"
+                  file={backFile}
+                  onChange={setBackFile}
+                />
+                <PhotoFileField
+                  id="side-photo-upload"
+                  label="Side Photo"
+                  file={sideFile}
+                  onChange={setSideFile}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={photoNote}
+                  onChange={(e) => setPhotoNote(e.target.value)}
+                  className={`${styles.input} flex-1`}
+                  placeholder="Optional note (e.g., Week 1)"
+                />
+                <button
+                  onClick={handleUploadPhotos}
+                  disabled={uploadingPhotos || !frontFile || !backFile || !sideFile}
+                  className={`${styles.buttonPrimaryStats} disabled:opacity-50`}
+                >
+                  {uploadingPhotos ? "Uploading..." : "Upload All 3"}
+                </button>
+              </div>
+            </div>
+
+{photoWeeks.length === 0 ? (
+  <p className={`${styles.body} mt-6`}>
+    No progress photos yet. Upload your first set!
+  </p>
+) : (
+  <div className="mt-6">
+    {/* Photo comparison rows */}
+    <div className="space-y-6">
+      {/* Front Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Front</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`front-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.front ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEnlargedPhoto({
+                        photo: week.front as ProgressPhoto,
+                        label: "Front",
+                        weekNumber: week.week_number,
+                      })
+                    }
+                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
+                  >
+                    <img
+                      src={getPhotoUrl(week.front)}
+                      alt="Front"
+                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
+                    />
+                  </button>
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow between first and last */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <button
+                  onClick={() => setShowAllWeeks(true)}
+                  className="flex flex-col items-center gap-1 px-4 text-gold hover:opacity-80"
+                  title="Show all weeks"
+                >
+                  <ChevronRight size={32} />
+                  <span className="text-xs font-medium">
+                    {photoWeeks.length - 2} week{photoWeeks.length - 2 !== 1 ? "s" : ""}
+                  </span>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Back Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Back</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`back-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.back ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEnlargedPhoto({
+                        photo: week.back as ProgressPhoto,
+                        label: "Back",
+                        weekNumber: week.week_number,
+                      })
+                    }
+                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
+                  >
+                    <img
+                      src={getPhotoUrl(week.back)}
+                      alt="Back"
+                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
+                    />
+                  </button>
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow (invisible spacer to maintain alignment) */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <div className="w-20" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Side Row */}
+      <div>
+        <p className="mb-2 text-sm font-semibold text-ink">Side</p>
+        <div className="flex items-center gap-4">
+          {displayWeeks.map((week, index) => (
+            <div key={`side-${week.log_date}`} className="flex items-center gap-4">
+              {/* Week Card */}
+              <div className="flex-1">
+                <p className="mb-2 text-xs font-medium text-ink-muted">
+                  Week {week.week_number} - {week.log_date}
+                </p>
+                {week.side ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEnlargedPhoto({
+                        photo: week.side as ProgressPhoto,
+                        label: "Side",
+                        weekNumber: week.week_number,
+                      })
+                    }
+                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
+                  >
+                    <img
+                      src={getPhotoUrl(week.side)}
+                      alt="Side"
+                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
+                    />
+                  </button>
+                ) : (
+                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
+                    No photo
+                  </div>
+                )}
+              </div>
+
+              {/* Arrow (invisible spacer to maintain alignment) */}
+              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+                <div className="w-20" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Delete buttons row */}
+      <div className="flex items-center gap-4">
+        {displayWeeks.map((week, index) => (
+          <div key={`delete-${week.log_date}`} className="flex items-center gap-4">
+            <div className="flex-1">
+              <button
+                onClick={() => handleDeleteWeek(week.log_date)}
+                disabled={deletingWeek === week.log_date}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
+                title="Delete this week"
+              >
+                <Trash2 size={16} />
+                Delete Week {week.week_number}
+              </button>
+            </div>
+
+            {/* Arrow spacer */}
+            {index === 0 && !showAllWeeks && hasMiddleWeeks && (
+              <div className="w-20" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {showAllWeeks && hasMiddleWeeks && (
+      <button
+        onClick={() => setShowAllWeeks(false)}
+        className="mt-4 text-sm text-gold hover:underline"
+      >
+        Show only first and latest
+      </button>
+    )}
+  </div>
+)}
+          </div>
+
+          <div className={styles.card}>
             <h2 className={styles.h2}>Body Measurements</h2>
 
             <p className="mt-1 text-sm text-ink-muted">
@@ -989,204 +1414,38 @@ const handleUploadPhotos = async () => {
               )}
             </div>
           </div>
-
-          <div className={styles.card}>
-            <h2 className={styles.h2}>Progress Photos</h2>
-            <p className="mt-1 text-sm text-ink-muted">
-              Upload Front, Back, and Side photos together as a weekly set
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div className="grid gap-3 md:grid-cols-3">
-                <PhotoFileField
-                  id="front-photo-upload"
-                  label="Front Photo"
-                  file={frontFile}
-                  onChange={setFrontFile}
-                />
-                <PhotoFileField
-                  id="back-photo-upload"
-                  label="Back Photo"
-                  file={backFile}
-                  onChange={setBackFile}
-                />
-                <PhotoFileField
-                  id="side-photo-upload"
-                  label="Side Photo"
-                  file={sideFile}
-                  onChange={setSideFile}
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={photoNote}
-                  onChange={(e) => setPhotoNote(e.target.value)}
-                  className={`${styles.input} flex-1`}
-                  placeholder="Optional note (e.g., Week 1)"
-                />
-                <button
-                  onClick={handleUploadPhotos}
-                  disabled={uploadingPhotos || !frontFile || !backFile || !sideFile}
-                  className={`${styles.buttonPrimaryStats} disabled:opacity-50`}
-                >
-                  {uploadingPhotos ? "Uploading..." : "Upload All 3"}
-                </button>
-              </div>
-            </div>
-
-{photoWeeks.length === 0 ? (
-  <p className={`${styles.body} mt-6`}>
-    No progress photos yet. Upload your first set!
-  </p>
-) : (
-  <div className="mt-6">
-    {/* Photo comparison rows */}
-    <div className="space-y-6">
-      {/* Front Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Front</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`front-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
-                </p>
-                {week.front ? (
-                  <img
-                    src={week.front.signed_url ?? week.front.image_url}
-                    alt="Front"
-                    className="h-48 w-full rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
-              </div>
-
-              {/* Arrow between first and last */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <button
-                  onClick={() => setShowAllWeeks(true)}
-                  className="flex flex-col items-center gap-1 px-4 text-gold hover:opacity-80"
-                  title="Show all weeks"
-                >
-                  <ChevronRight size={32} />
-                  <span className="text-xs font-medium">
-                    {photoWeeks.length - 2} week{photoWeeks.length - 2 !== 1 ? "s" : ""}
-                  </span>
-                </button>
-              )}
-            </div>
-          ))}
         </div>
-      </div>
+      )}
 
-      {/* Back Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Back</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`back-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
+      {enlargedPhoto && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4">
+          <div className="relative flex max-h-full w-full max-w-5xl flex-col gap-3">
+            <div className="flex items-center justify-between gap-3 text-white">
+              <div>
+                <p className="text-sm font-semibold">
+                  Week {enlargedPhoto.weekNumber} - {enlargedPhoto.label}
                 </p>
-                {week.back ? (
-                  <img
-                    src={week.back.signed_url ?? week.back.image_url}
-                    alt="Back"
-                    className="h-48 w-full rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
-              </div>
-
-              {/* Arrow (invisible spacer to maintain alignment) */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <div className="w-20" />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Side Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Side</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`side-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
+                <p className="text-xs text-white/70">
+                  {enlargedPhoto.photo.log_date}
                 </p>
-                {week.side ? (
-                  <img
-                    src={week.side.signed_url ?? week.side.image_url}
-                    alt="Side"
-                    className="h-48 w-full rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
               </div>
-
-              {/* Arrow (invisible spacer to maintain alignment) */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <div className="w-20" />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Delete buttons row */}
-      <div className="flex items-center gap-4">
-        {displayWeeks.map((week, index) => (
-          <div key={`delete-${week.log_date}`} className="flex items-center gap-4">
-            <div className="flex-1">
               <button
-                onClick={() => handleDeleteWeek(week.log_date)}
-                disabled={deletingWeek === week.log_date}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
-                title="Delete this week"
+                type="button"
+                onClick={() => setEnlargedPhoto(null)}
+                className="rounded-full bg-white/15 p-2 text-white transition hover:bg-white/25"
+                aria-label="Close enlarged photo"
               >
-                <Trash2 size={16} />
-                Delete Week {week.week_number}
+                <X size={20} />
               </button>
             </div>
 
-            {/* Arrow spacer */}
-            {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-              <div className="w-20" />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-
-    {showAllWeeks && hasMiddleWeeks && (
-      <button
-        onClick={() => setShowAllWeeks(false)}
-        className="mt-4 text-sm text-gold hover:underline"
-      >
-        Show only first and latest
-      </button>
-    )}
-  </div>
-)}
+            <div className="min-h-0 overflow-hidden rounded-xl bg-black">
+              <img
+                src={getPhotoUrl(enlargedPhoto.photo)}
+                alt={`${enlargedPhoto.label} progress photo from ${enlargedPhoto.photo.log_date}`}
+                className="max-h-[82vh] w-full object-contain"
+              />
+            </div>
           </div>
         </div>
       )}

@@ -18,6 +18,7 @@ import {
   getActiveCompanionView,
   isCompanionEnabledForClient,
   awardBondXp,
+  COMPANION_XP_REWARDS,
   type ActiveCompanionView,
 } from "@/lib/companions";
 // import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch â€” see commit notes.
@@ -562,7 +563,7 @@ const handleSaveSteps = async () => {
   if (crossingTarget) {
     await awardBondXp(
       client.id,
-      20,
+      COMPANION_XP_REWARDS.stepsTargetHit,
       "steps_target_hit",
       "Daily step target hit"
     );
@@ -650,7 +651,7 @@ if (newWaterStatus) {
   // if companions aren't enabled for this client.
   await awardBondXp(
     client.id,
-    15,
+    COMPANION_XP_REWARDS.waterTargetHit,
     "water_complete",
     "Daily water target hit"
   );
@@ -737,7 +738,7 @@ if (updateError) throw updateError;
 // flag flip is idempotent), so no extra check needed for repeat awards.
 await awardBondXp(
   client.id,
-  200,
+  COMPANION_XP_REWARDS.milestoneComplete,
   `milestone_week_${milestoneConfig.week_number}`,
   `Completed Week ${milestoneConfig.week_number} milestone`
 );
@@ -812,175 +813,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
 
             <ClientUnreadRepliesBanner clientId={client.id} />
 
-            <ThisWeekWorkouts
-              days={programDays}
-              completions={workoutCompletions.filter(
-                (completion) => completion.completed_date >= weekStart
-              )}
-              currentDayId={currentDay?.id ?? null}
-              weekStart={weekStart}
-            />
-
-            <WeeklyCheckInCard
-              clientId={client.id}
-              weekStart={weekStart}
-              onboardingCompletedAt={
-                client.onboarding_completed_at ?? client.created_at ?? null
-              }
-              presentation={today === weekStart ? "modal" : "card"}
-            />
-
-            <MessageTrainerBox
-              clientId={client.id}
-              contextType="general"
-              contextLabel="General check-in"
-              placeholder="Ask a question or leave your trainer a quick update..."
-              showRecentMessages={false}
-            />
-
-            <div className={styles.card}>
-              <div className="flex items-start gap-3">
-                <div className="rounded-lg bg-gold/10 p-2 text-gold">
-                  <CalendarClock size={20} />
-                </div>
-                <div>
-                  <h2 className={styles.h2}>Request online PT</h2>
-                  <p className="mt-1 text-sm text-ink-muted">
-                    Send Peter a preferred date and time. He can confirm it or
-                    suggest an alternative.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] md:items-end">
-                <div>
-                  <label className="text-sm font-medium text-ink">
-                    Preferred date and time
-                  </label>
-                  <input
-                    type="datetime-local"
-                    value={preferredPtDateTime}
-                    onChange={(event) => setPreferredPtDateTime(event.target.value)}
-                    className={styles.input}
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-ink">
-                    Notes
-                  </label>
-                  <input
-                    value={ptRequestNote}
-                    onChange={(event) => setPtRequestNote(event.target.value)}
-                    className={styles.input}
-                    placeholder="Anything Peter should know?"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleSubmitPtRequest}
-                  disabled={submittingPtRequest}
-                  className={styles.buttonPrimary}
-                >
-                  {submittingPtRequest ? "Sending..." : "Send request"}
-                </button>
-              </div>
-
-              {ptRequests.length > 0 && (
-                <div className="mt-5 space-y-2">
-                  <p className="text-sm font-semibold text-ink">Recent requests</p>
-                  {ptRequests.map((request) => (
-                    <div
-                      key={request.id}
-                      className="rounded-md border border-border-subtle bg-surface-sunken p-3"
-                    >
-                      <div>
-                        <div>
-                          <p className="text-sm font-medium text-ink">
-                            Preferred: {formatSessionDateTime(request.preferred_start_at)}
-                          </p>
-                          <p className="mt-1 text-xs text-ink-muted">
-                            Status: {request.status.replaceAll("_", " ")}
-                          </p>
-                          {request.status === "confirmed" && (
-                            <p className="mt-1 text-sm text-emerald">
-                              Confirmed for {formatSessionDateTime(request.confirmed_start_at)}
-                            </p>
-                          )}
-                          {request.status === "alternative_suggested" && (
-                            <p className="mt-1 text-sm text-gold">
-                              Alternative suggested: {formatSessionDateTime(request.proposed_start_at)}
-                            </p>
-                          )}
-                          {request.trainer_response && (
-                            <p className="mt-1 text-sm text-ink-muted">
-                              Peter: {request.trainer_response}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
-              <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
-                <Link href="/client/workout" className="block min-w-0">
-                  <p className="text-sm text-ink-muted">Today&apos;s Workout</p>
-                  <p className="mt-1 break-words text-lg font-semibold text-ink">
-                    {currentDay?.day_name || "No active programme day"}
-                  </p>
-                  <p className="mt-2 text-sm text-ink-muted">
-                    {completedExercises} of {totalExercises} exercises complete
-                  </p>
-                </Link>
-
-                <div className="mt-4 border-t border-border-subtle pt-4">
-                  <p className="text-sm font-medium text-ink">Today&apos;s Steps</p>
-
-                  <div className="mt-2 flex w-full min-w-0 flex-wrap items-center gap-2">
-                    <input
-                      type="number"
-                      value={stepsInput}
-                      onChange={(e) => setStepsInput(e.target.value)}
-                      placeholder="0"
-                      className="min-w-0 flex-1 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-ink"
-                    />
-
-                    <span className="shrink-0 text-sm text-ink-muted">
-                      / {client.daily_step_target.toLocaleString()}
-                    </span>
-
-                    <button
-                      onClick={handleSaveSteps}
-                      disabled={savingSteps}
-                      className={`${styles.buttonPrimaryWorkout} shrink-0`}
-                    >
-                      {savingSteps ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-
-                  {dailyTracking?.steps_logged !== null && (
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white">
-                      <div
-                        className="h-full rounded-full bg-navy transition-all"
-                        style={{
-                          width: `${Math.min(
-                            ((dailyTracking?.steps_logged ?? 0) /
-                              client.daily_step_target) *
-                              100,
-                            100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
                 <Link href="/client/nutrition" className="block min-w-0">
                   <p className="text-sm text-ink-muted">Food Eaten Today</p>
@@ -1043,6 +876,76 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                   </div>
                 </div>
               </div>
+
+              <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
+                <ThisWeekWorkouts
+                  days={programDays}
+                  completions={workoutCompletions.filter(
+                    (completion) => completion.completed_date >= weekStart
+                  )}
+                  currentDayId={currentDay?.id ?? null}
+                  weekStart={weekStart}
+                  embedded
+                />
+
+                {programDays.length === 0 && (
+                  <Link href="/client/workout" className="block min-w-0">
+                    <p className="text-sm text-ink-muted">Workouts</p>
+                    <p className="mt-1 break-words text-lg font-semibold text-ink">
+                      No active programme day
+                    </p>
+                  </Link>
+                )}
+
+                {currentDay && (
+                  <p className="mt-3 text-sm text-ink-muted">
+                    {completedExercises} of {totalExercises} exercises complete for{" "}
+                    {currentDay.day_name || "today's workout"}
+                  </p>
+                )}
+
+                <div className="mt-4 border-t border-border-subtle pt-4">
+                  <p className="text-sm font-medium text-ink">Today&apos;s Steps</p>
+
+                  <div className="mt-2 flex w-full min-w-0 flex-wrap items-center gap-2">
+                    <input
+                      type="number"
+                      value={stepsInput}
+                      onChange={(e) => setStepsInput(e.target.value)}
+                      placeholder="0"
+                      className="min-w-0 flex-1 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-ink"
+                    />
+
+                    <span className="shrink-0 text-sm text-ink-muted">
+                      / {client.daily_step_target.toLocaleString()}
+                    </span>
+
+                    <button
+                      onClick={handleSaveSteps}
+                      disabled={savingSteps}
+                      className={`${styles.buttonPrimaryWorkout} shrink-0`}
+                    >
+                      {savingSteps ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+
+                  {dailyTracking?.steps_logged !== null && (
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white">
+                      <div
+                        className="h-full rounded-full bg-navy transition-all"
+                        style={{
+                          width: `${Math.min(
+                            ((dailyTracking?.steps_logged ?? 0) /
+                              client.daily_step_target) *
+                              100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <Link
@@ -1071,6 +974,99 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                 View graphs, measurements and photos
               </p>
             </Link>
+
+            <div className={styles.card}>
+              <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-gold/10 p-2 text-gold">
+                  <CalendarClock size={20} />
+                </div>
+                <div>
+                  <h2 className={styles.h2}>Request online PT</h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Send Peter a preferred date and time. He can confirm it or
+                    suggest an alternative.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] md:items-end">
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Preferred date and time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={preferredPtDateTime}
+                    onChange={(event) => setPreferredPtDateTime(event.target.value)}
+                    className={styles.input}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Notes
+                  </label>
+                  <input
+                    value={ptRequestNote}
+                    onChange={(event) => setPtRequestNote(event.target.value)}
+                    className={styles.input}
+                    placeholder="Anything Peter should know?"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSubmitPtRequest}
+                  disabled={submittingPtRequest}
+                  className={styles.buttonPrimary}
+                >
+                  {submittingPtRequest ? "Sending..." : "Send request"}
+                </button>
+              </div>
+
+              {ptRequests.length > 0 && (
+                <div className="mt-5 space-y-2">
+                  <p className="text-sm font-semibold text-ink">Recent requests</p>
+                  {ptRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="rounded-md border border-border-subtle bg-surface-sunken p-3"
+                    >
+                      <p className="text-sm font-medium text-ink">
+                        Preferred: {formatSessionDateTime(request.preferred_start_at)}
+                      </p>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Status: {request.status.replaceAll("_", " ")}
+                      </p>
+                      {request.status === "confirmed" && (
+                        <p className="mt-1 text-sm text-emerald">
+                          Confirmed for {formatSessionDateTime(request.confirmed_start_at)}
+                        </p>
+                      )}
+                      {request.status === "alternative_suggested" && (
+                        <p className="mt-1 text-sm text-gold">
+                          Alternative suggested: {formatSessionDateTime(request.proposed_start_at)}
+                        </p>
+                      )}
+                      {request.trainer_response && (
+                        <p className="mt-1 text-sm text-ink-muted">
+                          Peter: {request.trainer_response}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <MessageTrainerBox
+              clientId={client.id}
+              contextType="general"
+              contextLabel="General check-in"
+              title="Message Peter"
+              placeholder="Ask Peter a question or leave him a quick update..."
+              showRecentMessages={false}
+            />
 
             {/* Companion widget â€” only renders if companion feature is enabled for this client */}
             {companionEnabled && (
@@ -1135,6 +1131,15 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                 )}
               </Link>
             )}
+
+            <WeeklyCheckInCard
+              clientId={client.id}
+              weekStart={weekStart}
+              onboardingCompletedAt={
+                client.onboarding_completed_at ?? client.created_at ?? null
+              }
+              presentation={today === weekStart ? "modal" : "card"}
+            />
 
             {/* StreakDisplay hidden for launch â€” kept rendered=false so the underlying
                 streak mechanic still records data in the background. Re-enable by

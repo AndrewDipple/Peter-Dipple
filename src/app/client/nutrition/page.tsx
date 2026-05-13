@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { updateStreak } from "@/lib/streaks";
-import { awardBondXp } from "@/lib/companions";
+import { awardBondXp, COMPANION_XP_REWARDS } from "@/lib/companions";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import GuideLink from "@/components/GuideLink";
@@ -61,6 +61,7 @@ export default function ClientNutritionPage() {
   const searchParams = useSearchParams();
 
   const [clientId, setClientId] = useState<string | null>(null);
+  const [calorieTarget, setCalorieTarget] = useState<number | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [mealLogs, setMealLogs] = useState<MealLog[]>([]);
   const [customMeals, setCustomMeals] = useState<CustomMeal[]>([]);
@@ -101,6 +102,8 @@ export default function ClientNutritionPage() {
   }, [customMeals]);
 
   const totalCalories = recipeCaloriesTotal + customCaloriesTotal;
+  const caloriesRemaining =
+    calorieTarget !== null ? calorieTarget - totalCalories : null;
 
 type EatenMeal = {
   key: string;
@@ -178,6 +181,7 @@ const eatenMeals = useMemo<EatenMeal[]>(() => {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       setClientId(null);
+      setCalorieTarget(null);
       setRecipes([]);
       setMealLogs([]);
       setCustomMeals([]);
@@ -188,12 +192,13 @@ const eatenMeals = useMemo<EatenMeal[]>(() => {
 
     const { data: clientData, error: clientError } = await supabase
       .from("clients")
-      .select("id")
+      .select("id, calorie_target")
       .eq("profile_id", user.id)
       .single();
 
     if (clientError || !clientData) {
       setClientId(null);
+      setCalorieTarget(null);
       setRecipes([]);
       setMealLogs([]);
       setCustomMeals([]);
@@ -203,6 +208,7 @@ const eatenMeals = useMemo<EatenMeal[]>(() => {
     }
 
     setClientId(clientData.id);
+    setCalorieTarget(clientData.calorie_target ?? null);
 
     const [recipesRes, logsRes, customsRes, plansRes] = await Promise.all([
       supabase
@@ -339,7 +345,12 @@ const eatenMeals = useMemo<EatenMeal[]>(() => {
   setLoggingPlannedId(null);
 
   await updateStreak(clientId, "nutrition", selectedDate);
-  await awardBondXp(clientId, 10, "logged_planned_meal", "Logged a planned meal");
+  await awardBondXp(
+    clientId,
+    COMPANION_XP_REWARDS.loggedMeal,
+    "logged_planned_meal",
+    "Logged a planned meal"
+  );
 };
 
 const handleAddRecipeMeal = async () => {
@@ -366,7 +377,12 @@ const handleAddRecipeMeal = async () => {
   setAddingRecipe(false);
 
   await updateStreak(clientId, "nutrition", selectedDate);
-  await awardBondXp(clientId, 10, "logged_off_plan_meal", "Logged an off-plan recipe meal");
+  await awardBondXp(
+    clientId,
+    COMPANION_XP_REWARDS.loggedMeal,
+    "logged_off_plan_meal",
+    "Logged an off-plan recipe meal"
+  );
 };
 
   const handleRemoveRecipeMeal = async (mealId: string) => {
@@ -420,7 +436,12 @@ const handleAddCustomMeal = async () => {
   setSavingCustomMeal(false);
 
   await updateStreak(clientId, "nutrition", selectedDate);
-  await awardBondXp(clientId, 10, "logged_custom_meal", "Logged a custom meal");
+  await awardBondXp(
+    clientId,
+    COMPANION_XP_REWARDS.loggedMeal,
+    "logged_custom_meal",
+    "Logged a custom meal"
+  );
 };
 
   const handleRemoveCustomMeal = async (mealId: string) => {
@@ -498,25 +519,28 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
         {/* Calorie summary */}
         <div className={`${styles.card} bg-surface-sunken`}>
           <h2 className={styles.h2}>Calories {isToday ? "Today" : "for the day"}</h2>
-          <p className="mt-2 text-2xl font-bold text-ink">{totalCalories} kcal</p>
-          <p className="mt-1 text-sm text-ink-muted">{formatLongDate(selectedDate)}</p>
+          <p className="mt-2 text-2xl font-bold text-ink">
+            {totalCalories} kcal consumed
+          </p>
+          <p className="mt-1 text-sm text-ink-muted">
+            {caloriesRemaining === null
+              ? "No calorie target set"
+              : caloriesRemaining >= 0
+              ? `${caloriesRemaining} kcal remaining`
+              : `${Math.abs(caloriesRemaining)} kcal over target`}
+          </p>
         </div>
 
-        {clientId && (
-          <MessageTrainerBox
-            clientId={clientId}
-            contextType="nutrition"
-            contextId={selectedDate}
-            contextLabel={`Nutrition - ${formatLongDate(selectedDate)}`}
-            title="Nutrition question"
-            placeholder="Ask about meals, travel, swaps, or anything nutrition-related..."
-            accent="nutrition"
-            showRecentMessages={false}
-          />
-        )}
+        {/* Quick links */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Link href="/recipes" className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}>
+            <p className="text-xl font-bold text-emerald">Menu</p>
+            <p className="mt-1 text-lg font-semibold text-ink">Browse all available recipes</p>
+            <p className="mt-2 text-sm text-ink-muted">
+              View full recipe details, ingredients, and nutrition info
+            </p>
+          </Link>
 
-        {/* Three quick links */}
-        <div className="grid gap-4 md:grid-cols-3">
           <Link
             href="/client/meal-planner"
             className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}
@@ -525,27 +549,6 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
             <p className="mt-1 text-lg font-semibold text-ink">Plan meals ahead of time</p>
             <p className="mt-2 textxs text-ink-muted">
               Build your upcoming meals before the day arrives
-            </p>
-          </Link>
-
-          <Link
-            href="/client/shopping-list"
-            className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}
-          >
-            <p className="text-xl font-bold text-emerald">Shopping List</p>
-            <p className="mt-1 text-lg font-semibold text-ink">
-              Collated ingredients from planned meals
-            </p>
-            <p className="mt-2 text-sm text-ink-muted">
-              Generate a list based on your current meal plan
-            </p>
-          </Link>
-
-          <Link href="/recipes" className={`${styles.cardInteractive} border border-emerald bg-surface-sunken`}>
-            <p className="text-xl font-bold text-emerald"> Menu</p>
-            <p className="mt-1 text-lg font-semibold text-ink">Browse all available recipes</p>
-            <p className="mt-2 text-sm text-ink-muted">
-              View full recipe details, ingredients, and nutrition info
             </p>
           </Link>
         </div>
@@ -641,7 +644,7 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
         <div className={styles.card}>
           <h2 className={styles.h2}>Manually Add Recipe Meal</h2>
           <p className="mt-1 text-sm text-ink-muted">
-            Use this if you ate a recipe that wasn't on your plan for the day.
+            Use this if you ate a recipe that wasn&apos;t on your plan for the day.
           </p>
 
           <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
@@ -721,6 +724,18 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
           </button>
         </div>
 
+        {clientId && (
+          <MessageTrainerBox
+            clientId={clientId}
+            contextType="nutrition"
+            contextId={selectedDate}
+            contextLabel={`Nutrition - ${formatLongDate(selectedDate)}`}
+            title="Nutrition question"
+            placeholder="Ask about meals, travel, swaps, or anything nutrition-related..."
+            accent="nutrition"
+            showRecentMessages={false}
+          />
+        )}
 
       </div>
     </>

@@ -62,6 +62,28 @@ type ProgressPhoto = {
   note: string | null;
 };
 
+type CalorieWeekSummary = {
+  weekStart: string;
+  weekEnd: string;
+  consumed: number;
+  target: number | null;
+  difference: number | null;
+  averageDailyDifference: number | null;
+};
+
+type MealLogCalorieRow = {
+  log_date: string;
+  quantity: number | null;
+  recipes:
+    | {
+        calories: number | null;
+      }
+    | {
+        calories: number | null;
+      }[]
+    | null;
+};
+
 type TimelineItem = {
   key: string;
   date: string;
@@ -93,6 +115,16 @@ const formatDelta = (delta: number) => {
   return `${delta > 0 ? "+" : ""}${delta.toFixed(1)}kg`;
 };
 
+const formatKcal = (value: number) => `${Math.round(value).toLocaleString()} kcal`;
+
+const formatKcalDifference = (value: number | null) => {
+  if (value === null) return "-";
+  if (value === 0) return "On target";
+
+  const amount = formatKcal(Math.abs(value));
+  return value > 0 ? `${amount} over` : `${amount} under`;
+};
+
 const describeLevel = (value: number, lowLabel: string, highLabel: string) => {
   if (value <= 2) return lowLabel;
   if (value >= 4) return highLabel;
@@ -106,6 +138,9 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
   const [messages, setMessages] = useState<ClientMessage[]>([]);
   const [weights, setWeights] = useState<WeightLog[]>([]);
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
+  const [calorieSummaries, setCalorieSummaries] = useState<
+    Record<string, CalorieWeekSummary>
+  >({});
   const [loading, setLoading] = useState(true);
 
   const today = useMemo(() => todayStr(), []);
@@ -125,7 +160,19 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
 
       const programId = programData?.[0]?.id ?? null;
 
-      const [checkInRes, workoutRes, messageRes, weightRes, photoRes] = await Promise.all([
+      const [
+        clientRes,
+        checkInRes,
+        workoutRes,
+        messageRes,
+        weightRes,
+        photoRes,
+      ] = await Promise.all([
+        supabase
+          .from("clients")
+          .select("calorie_target")
+          .eq("id", clientId)
+          .maybeSingle(),
         supabase
           .from("client_weekly_check_ins")
           .select("*")
@@ -158,6 +205,9 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
           .limit(8),
       ]);
 
+      const loadedCheckIns = (checkInRes.data ?? []) as WeeklyCheckIn[];
+      const dailyCalorieTarget = clientRes.data?.calorie_target ?? null;
+
       if (programId) {
         const { data: daysData } = await supabase
           .from("client_program_days")
@@ -169,11 +219,90 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
         setProgramDays([]);
       }
 
-      setCheckIns((checkInRes.data ?? []) as WeeklyCheckIn[]);
+      setCheckIns(loadedCheckIns);
       setWorkouts((workoutRes.data ?? []) as WorkoutCompletion[]);
       setMessages((messageRes.data ?? []) as ClientMessage[]);
       setWeights((weightRes.data ?? []) as WeightLog[]);
       setPhotos((photoRes.data ?? []) as ProgressPhoto[]);
+
+      if (loadedCheckIns.length === 0) {
+        setCalorieSummaries({});
+        setLoading(false);
+        return;
+      }
+
+      const reviewWindows = loadedCheckIns.map((checkIn) => ({
+        checkInWeekStart: checkIn.week_start,
+        weekStart: addDays(checkIn.week_start, -7),
+        weekEnd: addDays(checkIn.week_start, -1),
+      }));
+      const earliestLogDate = reviewWindows.reduce(
+        (earliest, item) => (item.weekStart < earliest ? item.weekStart : earliest),
+        reviewWindows[0].weekStart
+      );
+      const latestLogDate = reviewWindows.reduce(
+        (latest, item) => (item.weekEnd > latest ? item.weekEnd : latest),
+        reviewWindows[0].weekEnd
+      );
+
+      const [mealLogRes, customMealLogRes] = await Promise.all([
+        supabase
+          .from("meal_logs")
+          .select("log_date, quantity, recipes(calories)")
+          .eq("client_id", clientId)
+          .eq("completed", true)
+          .gte("log_date", earliestLogDate)
+          .lte("log_date", latestLogDate),
+        supabase
+          .from("custom_meal_logs")
+          .select("log_date, calories")
+          .eq("client_id", clientId)
+          .gte("log_date", earliestLogDate)
+          .lte("log_date", latestLogDate),
+      ]);
+
+      const caloriesByDate: Record<string, number> = {};
+
+      ((mealLogRes.data ?? []) as MealLogCalorieRow[]).forEach((meal) => {
+        const recipeData = Array.isArray(meal.recipes)
+          ? meal.recipes[0] ?? null
+          : meal.recipes ?? null;
+        const quantity = meal.quantity ?? 1;
+        caloriesByDate[meal.log_date] =
+          (caloriesByDate[meal.log_date] ?? 0) +
+          (recipeData?.calories ?? 0) * quantity;
+      });
+
+      (customMealLogRes.data ?? []).forEach((meal) => {
+        caloriesByDate[meal.log_date] =
+          (caloriesByDate[meal.log_date] ?? 0) + (meal.calories ?? 0);
+      });
+
+      const summaries = reviewWindows.reduce<Record<string, CalorieWeekSummary>>(
+        (result, item) => {
+          let consumed = 0;
+          for (let offset = 0; offset < 7; offset += 1) {
+            consumed += caloriesByDate[addDays(item.weekStart, offset)] ?? 0;
+          }
+
+          const weeklyTarget = dailyCalorieTarget ? dailyCalorieTarget * 7 : null;
+          const difference = weeklyTarget !== null ? consumed - weeklyTarget : null;
+
+          result[item.checkInWeekStart] = {
+            weekStart: item.weekStart,
+            weekEnd: item.weekEnd,
+            consumed,
+            target: weeklyTarget,
+            difference,
+            averageDailyDifference:
+              difference !== null ? Math.round(difference / 7) : null,
+          };
+          return result;
+        },
+        {}
+      );
+
+      setCalorieSummaries(summaries);
       setLoading(false);
     };
 
@@ -185,6 +314,10 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
   );
 
   const thisWeekCheckIn = checkIns.find((checkIn) => checkIn.week_start === weekStart) ?? null;
+  const latestCheckIn = checkIns[0] ?? null;
+  const latestCalorieSummary = latestCheckIn
+    ? calorieSummaries[latestCheckIn.week_start] ?? null
+    : null;
   const unreadClientMessages = messages.filter(
     (message) => message.sender_role === "client" && !message.read_by_trainer_at
   );
@@ -214,6 +347,10 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
       : "check-in missing",
     thisWeekCheckIn
       ? `hunger ${describeLevel(thisWeekCheckIn.hunger_level, "low", "high")}`
+      : null,
+    latestCalorieSummary?.difference !== null &&
+    latestCalorieSummary?.difference !== undefined
+      ? `previous week ${formatKcalDifference(latestCalorieSummary.difference).toLowerCase()}`
       : null,
     weightDelta !== null ? `weight ${formatDelta(weightDelta)}` : null,
     `${unreadClientMessages.length} unread message${unreadClientMessages.length === 1 ? "" : "s"}`,
@@ -302,7 +439,9 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
             {summaryParts.join(", ") || "No summary data yet"}.
           </p>
           {thisWeekCheckIn?.notes && (
-            <p className="mt-3 text-sm text-ink-muted">"{thisWeekCheckIn.notes}"</p>
+            <p className="mt-3 text-sm text-ink-muted">
+              &quot;{thisWeekCheckIn.notes}&quot;
+            </p>
           )}
         </div>
 
@@ -329,6 +468,59 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
         </div>
       </div>
 
+      <div className="rounded-xl border border-emerald/20 bg-surface-raised p-4 shadow-subtle">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+          <h3 className="font-semibold text-ink">Calories Against Target</h3>
+          {latestCalorieSummary && (
+            <p className="text-xs text-ink-muted">
+              Previous week: {formatDate(latestCalorieSummary.weekStart)} -{" "}
+              {formatDate(latestCalorieSummary.weekEnd)}
+            </p>
+          )}
+        </div>
+
+        {!latestCalorieSummary ? (
+          <p className="mt-3 text-sm text-ink-muted">
+            No weekly check-in calorie window available yet.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-lg bg-surface-sunken p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                Consumed vs target
+              </p>
+              <p className="mt-1 text-lg font-bold text-ink">
+                {formatKcal(latestCalorieSummary.consumed)}
+              </p>
+              <p className="text-sm text-ink-muted">
+                /{" "}
+                {latestCalorieSummary.target !== null
+                  ? formatKcal(latestCalorieSummary.target)
+                  : "No target set"}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-surface-sunken p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                Total difference
+              </p>
+              <p className="mt-1 text-lg font-bold text-ink">
+                {formatKcalDifference(latestCalorieSummary.difference)}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-surface-sunken p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                Average daily difference
+              </p>
+              <p className="mt-1 text-lg font-bold text-ink">
+                {formatKcalDifference(latestCalorieSummary.averageDailyDifference)}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="rounded-xl border border-border-subtle bg-surface-raised p-4 shadow-subtle">
           <h3 className="font-semibold text-ink">Check-in History</h3>
@@ -353,6 +545,45 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
               </ResponsiveContainer>
             </div>
           )}
+
+          <div className="mt-4 space-y-3">
+            {checkIns.slice(0, 6).map((checkIn) => {
+              const summary = calorieSummaries[checkIn.week_start] ?? null;
+
+              return (
+                <div
+                  key={checkIn.id}
+                  className="rounded-lg border border-border-subtle bg-surface-sunken px-3 py-2"
+                >
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">
+                        Check-in {formatDate(checkIn.week_start)}
+                      </p>
+                      <p className="text-xs text-ink-muted">
+                        Energy {checkIn.energy_level}/5, hunger{" "}
+                        {checkIn.hunger_level}/5, sleep {checkIn.sleep_quality}/5
+                      </p>
+                    </div>
+                    {summary && (
+                      <p className="text-xs text-ink-muted">
+                        Calories: {formatKcal(summary.consumed)}
+                        {summary.target !== null
+                          ? ` / ${formatKcal(summary.target)}`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+                  {summary && (
+                    <p className="mt-2 text-sm text-ink">
+                      Difference: {formatKcalDifference(summary.difference)} total,{" "}
+                      {formatKcalDifference(summary.averageDailyDifference)} per day
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface-raised p-4 shadow-subtle">

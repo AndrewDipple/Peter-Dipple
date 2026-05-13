@@ -17,6 +17,7 @@ type ProgramTemplate = {
   name: string;
   duration_weeks: number | null;
   days_per_week: number | null;
+  workout_location: string | null;
 };
 
 type ProgramTemplateDay = {
@@ -43,10 +44,18 @@ type ExerciseLibraryItem = {
   primary_equipment: string | null;
 };
 
+const workoutLocationOptions = [
+  { value: "gym", label: "Gym" },
+  { value: "home_weights", label: "Home weights" },
+];
+
 export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [templateId, setTemplateId] = useState("");
   const [template, setTemplate] = useState<ProgramTemplate | null>(null);
   const [templateName, setTemplateName] = useState("");
+  const [templateDurationWeeks, setTemplateDurationWeeks] = useState("4");
+  const [templateDaysPerWeek, setTemplateDaysPerWeek] = useState("3");
+  const [templateWorkoutLocation, setTemplateWorkoutLocation] = useState("gym");
   const [days, setDays] = useState<ProgramTemplateDay[]>([]);
   const [exercisesByDay, setExercisesByDay] = useState<
     Record<string, ProgramTemplateExercise[]>
@@ -172,6 +181,9 @@ const [editExerciseValues, setEditExerciseValues] = useState<
     if (templateError || !templateData) {
       setTemplate(null);
       setTemplateName("");
+      setTemplateDurationWeeks("4");
+      setTemplateDaysPerWeek("3");
+      setTemplateWorkoutLocation("gym");
       setDays([]);
       setExercisesByDay({});
       setLoading(false);
@@ -180,6 +192,13 @@ const [editExerciseValues, setEditExerciseValues] = useState<
 
     setTemplate(templateData);
     setTemplateName(templateData.name ?? "");
+    setTemplateDurationWeeks(
+      templateData.duration_weeks ? String(templateData.duration_weeks) : "4"
+    );
+    setTemplateDaysPerWeek(
+      templateData.days_per_week ? String(templateData.days_per_week) : "3"
+    );
+    setTemplateWorkoutLocation(templateData.workout_location ?? "gym");
 
     const { data: dayData, error: dayError } = await supabase
       .from("program_template_days")
@@ -229,10 +248,12 @@ const [editExerciseValues, setEditExerciseValues] = useState<
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
-  const handleSaveTemplateName = async () => {
+  const handleSaveTemplateDetails = async () => {
     if (!templateId || !templateName.trim()) {
       alert("Please enter a template name");
       return;
@@ -240,9 +261,17 @@ const [editExerciseValues, setEditExerciseValues] = useState<
 
     setSavingTemplate(true);
 
+    const durationWeeks = Number(templateDurationWeeks);
+    const daysPerWeek = Number(templateDaysPerWeek);
+
     const { error } = await supabase
       .from("program_templates")
-      .update({ name: templateName.trim() })
+      .update({
+        name: templateName.trim(),
+        duration_weeks: Number.isFinite(durationWeeks) ? durationWeeks : null,
+        days_per_week: Number.isFinite(daysPerWeek) ? daysPerWeek : null,
+        workout_location: templateWorkoutLocation || null,
+      })
       .eq("id", templateId);
 
     if (error) {
@@ -252,7 +281,17 @@ const [editExerciseValues, setEditExerciseValues] = useState<
     }
 
     setTemplate((prev) =>
-      prev ? { ...prev, name: templateName.trim() } : prev
+      prev
+        ? {
+            ...prev,
+            name: templateName.trim(),
+            duration_weeks: Number.isFinite(durationWeeks)
+              ? durationWeeks
+              : null,
+            days_per_week: Number.isFinite(daysPerWeek) ? daysPerWeek : null,
+            workout_location: templateWorkoutLocation || null,
+          }
+        : prev
     );
     setSavingTemplate(false);
   };
@@ -602,7 +641,8 @@ const handleSaveExerciseEdit = async (
             <h2 className={styles.subheading}>Template Details</h2>
 
             <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-              <div>
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="md:col-span-2">
                 <label className="text-sm font-medium text-ink">
                   Template name
                 </label>
@@ -611,14 +651,61 @@ const handleSaveExerciseEdit = async (
                   onChange={(e) => setTemplateName(e.target.value)}
                   className={styles.input}
                 />
-                <p className="mt-2 text-sm text-ink-muted">
-                  {template.duration_weeks ?? "-"} weeks •{" "}
-                  {template.days_per_week ?? "-"} days per week
-                </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Duration
+                  </label>
+                  <select
+                    value={templateDurationWeeks}
+                    onChange={(e) => setTemplateDurationWeeks(e.target.value)}
+                    className={styles.input}
+                  >
+                    {[4, 8, 12].map((weeks) => (
+                      <option key={weeks} value={weeks}>
+                        {weeks} weeks
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-ink">
+                    Days per week
+                  </label>
+                  <select
+                    value={templateDaysPerWeek}
+                    onChange={(e) => setTemplateDaysPerWeek(e.target.value)}
+                    className={styles.input}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7].map((daysPerWeek) => (
+                      <option key={daysPerWeek} value={daysPerWeek}>
+                        {daysPerWeek} days
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium text-ink">
+                    Workout location
+                  </label>
+                  <select
+                    value={templateWorkoutLocation}
+                    onChange={(e) => setTemplateWorkoutLocation(e.target.value)}
+                    className={styles.input}
+                  >
+                    {workoutLocationOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <button
-                onClick={handleSaveTemplateName}
+                onClick={handleSaveTemplateDetails}
                 disabled={savingTemplate}
                 className={styles.buttonPrimary}
               >

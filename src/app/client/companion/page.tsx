@@ -7,6 +7,7 @@ import { styles } from "@/lib/design";
 import GuideLink from "@/components/GuideLink";
 import {
   awardBondXp,
+  COMPANION_XP_REWARDS,
   chooseCompanion,
   deactivateCompanion,
   findClientCompanionForPath,
@@ -16,6 +17,7 @@ import {
   isCompanionEnabledForClient,
   listAvailablePaths,
   listCompanionCollection,
+  personalizeCompanionLine,
   renameCompanion,
   type ActiveCompanionView,
   type CompanionCollectionItem,
@@ -88,10 +90,14 @@ export default function CompanionPage() {
 
     if (activeView) {
       const [randomLine, events] = await Promise.all([
-        getRandomLine(activeView.path.slug, "general"),
+        getRandomLine(
+          activeView.path.slug,
+          "general",
+          activeView.currentForm.form_number
+        ),
         getRecentCompanionEvents(activeView.companion.id, 5),
       ]);
-      setLine(randomLine);
+      setLine(personalizeCompanionLine(randomLine, activeView));
       setRecentEvents(events);
     } else {
       setLine(null);
@@ -150,7 +156,7 @@ export default function CompanionPage() {
     if (isFirstChoice) {
       await awardBondXp(
         clientId,
-        100,
+        COMPANION_XP_REWARDS.chooseCompanion,
         "chose_companion",
         `Chose ${path?.name ?? "a companion"}`
       );
@@ -159,7 +165,7 @@ export default function CompanionPage() {
     if (isFirstChoice) {
       await awardBondXp(
         clientId,
-        50,
+        COMPANION_XP_REWARDS.nameCompanion,
         "named_companion",
         `Named your companion "${companionName}"`
       );
@@ -216,6 +222,8 @@ export default function CompanionPage() {
     : null;
   const starterItems = collection.filter((item) => item.path.is_starter);
   const lockedItems = collection.filter((item) => !item.isUnlocked);
+  const masteredItems = collection.filter((item) => item.isMastered);
+  const availableCollectionItems = collection.filter((item) => !item.isMastered);
 
   const getCompanionTypeLabel = (type: CompanionPath["companion_type"]) => {
     switch (type) {
@@ -240,6 +248,19 @@ export default function CompanionPage() {
         return "General support and vibes";
       default:
         return null;
+    }
+  };
+
+  const getCompanionTypeClasses = (type: CompanionPath["companion_type"]) => {
+    switch (type) {
+      case "power":
+        return "border-blue-200 bg-blue-50 text-blue-700";
+      case "fuel":
+        return "border-emerald/25 bg-emerald/10 text-emerald";
+      case "spirit":
+        return "border-gold/30 bg-gold/10 text-gold";
+      default:
+        return "border-border-subtle bg-surface-sunken text-ink-muted";
     }
   };
 
@@ -305,9 +326,19 @@ export default function CompanionPage() {
             </div>
 
             {typeLabel && (
-              <p className="mt-1 text-sm font-medium text-gold">
+              <p
+                className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getCompanionTypeClasses(
+                  item.path.companion_type
+                )}`}
+              >
                 {typeLabel}
                 {typeDescription ? ` - ${typeDescription}` : ""}
+              </p>
+            )}
+
+            {item.currentForm && item.companion && (
+              <p className="mt-2 text-sm font-medium text-ink">
+                Level {item.currentForm.form_number} - {item.currentForm.name}
               </p>
             )}
 
@@ -438,10 +469,25 @@ export default function CompanionPage() {
         <div className="mt-6 space-y-6">
           <div className={`${styles.card} bg-surface-sunken`}>
             <h2 className={styles.h2}>Choose your first Companion Type</h2>
-            <p className="mt-2 text-sm text-ink-muted">
-              Power is for training energy. Fuel is for food, growth, and
-              planning. Spirit is for general support and vibes. Pick one, or
-              carry on without one for now.
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(["power", "fuel", "spirit"] as const).map((type) => {
+                const label = getCompanionTypeLabel(type);
+                const description = getCompanionTypeDescription(type);
+
+                return (
+                  <span
+                    key={type}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getCompanionTypeClasses(
+                      type
+                    )}`}
+                  >
+                    {label} - {description}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-sm text-ink-muted">
+              Pick one, or carry on without one for now.
             </p>
           </div>
 
@@ -535,9 +581,19 @@ export default function CompanionPage() {
                   </div>
                 )}
 
-                <p className="mt-1 text-sm font-medium text-emerald">
-                  {view.currentForm.name}
-                </p>
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                  <span className="rounded-full border border-emerald/25 bg-emerald/10 px-2.5 py-1 text-xs font-semibold text-emerald">
+                    Level {view.currentForm.form_number}
+                  </span>
+                  {view.companion.is_mastered && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-gold/30 bg-gold/10 px-2.5 py-1 text-xs font-semibold text-gold">
+                      <Sparkles size={12} /> Mastered
+                    </span>
+                  )}
+                  <p className="text-sm font-medium text-emerald">
+                    {view.currentForm.name}
+                  </p>
+                </div>
                 {view.currentForm.description && (
                   <p className="mt-2 text-sm text-ink-muted">
                     {view.currentForm.description}
@@ -555,10 +611,19 @@ export default function CompanionPage() {
 
           <div className={styles.card}>
             <div className="flex items-baseline justify-between">
-              <h3 className="font-semibold text-ink">Bond XP</h3>
+              <div>
+                <h3 className="font-semibold text-ink">Bond XP</h3>
+                <p className="text-xs font-medium text-ink-muted">
+                  Level {view.currentForm.form_number}
+                </p>
+              </div>
               <span className="text-sm font-medium text-ink">
                 {view.companion.xp.toLocaleString()}
-                {view.nextForm && ` / ${view.nextForm.xp_required.toLocaleString()}`}
+                {view.nextForm
+                  ? ` / ${view.nextForm.xp_required.toLocaleString()}`
+                  : !view.companion.is_mastered
+                  ? ` / ${view.masteryXpRequired.toLocaleString()}`
+                  : ""}
               </span>
             </div>
 
@@ -571,27 +636,49 @@ export default function CompanionPage() {
 
             {view.nextForm ? (
               <p className="mt-3 text-sm text-ink-muted">
-                {view.xpToNextForm} XP to evolve into{" "}
+                {view.xpToNextForm} XP to transform into{" "}
                 <span className="font-medium text-ink">{view.nextForm.name}</span>.
+              </p>
+            ) : !view.companion.is_mastered ? (
+              <p className="mt-3 text-sm text-ink-muted">
+                {view.xpToMastery} XP to master{" "}
+                <span className="font-medium text-ink">{view.currentForm.name}</span>.
               </p>
             ) : (
               <p className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald">
-                <Sparkles size={14} /> Mastered. Fully evolved.
+                <Sparkles size={14} /> Mastered. Fully transformed.
               </p>
             )}
           </div>
 
-          <div className={styles.card}>
+          <div className="space-y-1">
             <h3 className="font-semibold text-ink">Companion collection</h3>
-            <p className="mt-1 text-sm text-ink-muted">
-              Fully evolved companions stay here. You can switch back to them
+            <p className="text-sm text-ink-muted">
+              Fully transformed companions stay here. You can switch back to them
               any time.
             </p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            {collection.map((item) => renderCompanionCard(item, "collection"))}
-          </div>
+          {masteredItems.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {masteredItems.map((item) => renderCompanionCard(item, "collection"))}
+            </div>
+          ) : (
+            <p className={styles.body}>
+              Master a companion and they will appear here.
+            </p>
+          )}
+
+          {availableCollectionItems.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-ink">Available companions</h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                {availableCollectionItems.map((item) =>
+                  renderCompanionCard(item, "collection")
+                )}
+              </div>
+            </div>
+          )}
 
           {recentEvents.length > 0 && (
             <div className={styles.card}>

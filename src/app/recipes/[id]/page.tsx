@@ -8,6 +8,7 @@ import { isStaff } from "@/lib/roles";
 import { todayStr } from "@/lib/dates";
 import {
   awardBondXp,
+  COMPANION_XP_REWARDS,
   getActiveCompanionView,
   isCompanionEnabledForClient,
   type ActiveCompanionView,
@@ -193,7 +194,12 @@ const handleMarkAsEaten = async () => {
   }
 
   // Same XP grant as the nutrition page's off-plan log.
-  await awardBondXp(clientId, 10, "logged_off_plan_meal", "Logged a recipe as eaten");
+  await awardBondXp(
+    clientId,
+    COMPANION_XP_REWARDS.loggedMeal,
+    "logged_off_plan_meal",
+    "Logged a recipe as eaten"
+  );
 
   setMarkingEaten(false);
   flashToast("Marked as eaten");

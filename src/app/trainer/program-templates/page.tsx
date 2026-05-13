@@ -11,6 +11,13 @@ type ProgramTemplate = {
   name: string;
   duration_weeks: number | null;
   days_per_week: number | null;
+  workout_location: string | null;
+};
+
+const formatWorkoutLocation = (location: string | null) => {
+  if (location === "gym") return "Gym";
+  if (location === "home_weights") return "Home weights";
+  return "Location not set";
 };
 
 export default function TrainerProgramTemplatesPage() {
@@ -47,6 +54,7 @@ export default function TrainerProgramTemplatesPage() {
           name: "New Programme Template",
           duration_weeks: 4,
           days_per_week: 3,
+          workout_location: "gym",
         },
       ])
       .select()
@@ -80,7 +88,8 @@ export default function TrainerProgramTemplatesPage() {
         ) : templates.length === 0 ? (
           <div className={styles.card}>
             <p className={styles.body}>
-              No templates yet. Click "Create New Template" to get started.
+              No templates yet. Click &quot;Create New Template&quot; to get
+              started.
             </p>
           </div>
         ) : (
@@ -90,12 +99,11 @@ export default function TrainerProgramTemplatesPage() {
               href={`/trainer/program-templates/${template.id}`}
             >
               <div className={`${styles.cardInteractive}`}>
-                <h2 className="font-semibold text-ink">
-                  {template.name}
-                </h2>
+                <h2 className="font-semibold text-ink">{template.name}</h2>
                 <p className="mt-1 text-sm text-ink-muted">
-                  {template.duration_weeks ?? "-"} weeks •{" "}
-                  {template.days_per_week ?? "-"} days per week
+                  {template.duration_weeks ?? "-"} weeks -{" "}
+                  {template.days_per_week ?? "-"} days per week -{" "}
+                  {formatWorkoutLocation(template.workout_location)}
                 </p>
               </div>
             </Link>

@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { getMondayOf, todayStr } from "@/lib/dates";
+import { getMondayOf, parseLocalDate, todayStr } from "@/lib/dates";
 import { updateStreak } from "@/lib/streaks";
 import {
   isCompanionEnabledForClient,
   getActiveCompanionView,
   getRandomLine,
+  personalizeCompanionLine,
   type ActiveCompanionView,
 } from "@/lib/companions";
 import AchievementCelebration from "@/components/AchievementCelebration";
@@ -712,26 +713,54 @@ export default function ClientWorkoutPage() {
     return getDefaultReps(exercise);
   };
 
-  const completedExerciseCount = useMemo(() => {
-    return dayExercises.filter((exercise) => {
-      const targetSets = exercise.sets ?? 0;
-      if (targetSets === 0) return false;
+  const totalSetCount = useMemo(
+    () =>
+      dayExercises.reduce(
+        (sum, exercise) => sum + Math.max(exercise.sets ?? 1, 1),
+        0
+      ),
+    [dayExercises]
+  );
 
+  const completedSetCount = useMemo(() => {
+    return dayExercises.reduce((sum, exercise) => {
+      const targetSets = Math.max(exercise.sets ?? 1, 1);
       const completedSets = setLogs.filter(
         (log) =>
-          log.client_program_day_exercise_id === exercise.id && log.completed
+          log.client_program_day_exercise_id === exercise.id &&
+          log.completed &&
+          log.set_number <= targetSets
       ).length;
 
-      return completedSets >= targetSets;
-    }).length;
+      return sum + Math.min(completedSets, targetSets);
+    }, 0);
   }, [dayExercises, setLogs]);
 
-  const totalExercises = dayExercises.length;
-
   const completionPercentage =
-    totalExercises > 0
-      ? Math.round((completedExerciseCount / totalExercises) * 100)
+    totalSetCount > 0
+      ? Math.round((completedSetCount / totalSetCount) * 100)
       : 0;
+
+  const isAllSetsComplete = totalSetCount > 0 && completedSetCount >= totalSetCount;
+
+  const calendarProgramWeek = useMemo(() => {
+    if (!clientProgram?.program_start_date) {
+      return clientProgram?.current_week && clientProgram.current_week > 0
+        ? clientProgram.current_week
+        : null;
+    }
+
+    const startMonday = getMondayOf(clientProgram.program_start_date);
+    const weekStartDate = parseLocalDate(weekStart);
+    const startMondayDate = parseLocalDate(startMonday);
+    const millisecondsPerWeek = 7 * 24 * 60 * 60 * 1000;
+    const weekOffset = Math.floor(
+      (weekStartDate.getTime() - startMondayDate.getTime()) /
+        millisecondsPerWeek
+    );
+
+    return Math.max(weekOffset + 1, 1);
+  }, [clientProgram?.current_week, clientProgram?.program_start_date, weekStart]);
 
   const activeExercise =
     dayExercises.find((exercise) => exercise.id === activeExerciseId) ??
@@ -1031,14 +1060,23 @@ export default function ClientWorkoutPage() {
         const slug = companionView.path.slug;
 
         // Try a couple of times to avoid immediate repeats.
-        let line = await getRandomLine(slug, "rest_timer");
+        let line = await getRandomLine(
+          slug,
+          "rest_timer",
+          companionView.currentForm.form_number
+        );
         if (line && line === lastLineRef.current) {
-          const second = await getRandomLine(slug, "rest_timer");
+          const second = await getRandomLine(
+            slug,
+            "rest_timer",
+            companionView.currentForm.form_number
+          );
           if (second) line = second;
         }
 
         if (line) {
-          setCompanionLine(line);
+          const personalisedLine = personalizeCompanionLine(line, companionView);
+          setCompanionLine(personalisedLine);
           lastLineRef.current = line;
         }
       } else {
@@ -1522,7 +1560,9 @@ export default function ClientWorkoutPage() {
                     ?
                   </div>
                 )}
-                <p className="text-sm italic opacity-95">"{companionLine}"</p>
+                <p className="text-sm italic opacity-95">
+                  &quot;{companionLine}&quot;
+                </p>
               </div>
             )}
           </div>
@@ -1552,30 +1592,15 @@ export default function ClientWorkoutPage() {
               setShowVideo(false);
             }}
             showOpenWorkoutLink={false}
+            metaLabel={
+              calendarProgramWeek !== null ? `Week ${calendarProgramWeek}` : null
+            }
           />
 
           <div className={styles.card}>
-            <div>
-              <div>
-                <h2 className={styles.h2}>
-                  {currentDay.day_name || "Workout Day"}
-                </h2>
-
-                <p className="mt-1 text-sm text-ink-muted">
-                  Current selected day
-                </p>
-
-                {clientProgram.current_week > 0 && (
-                  <p className="mt-1 text-xs text-ink-muted">
-                    Week {clientProgram.current_week}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <span className="text-sm text-ink">
-                {completedExerciseCount} of {totalExercises} exercises complete
+                {completedSetCount} of {totalSetCount} sets complete
               </span>
 
               <span className="text-sm text-ink-muted">
@@ -1591,6 +1616,27 @@ export default function ClientWorkoutPage() {
                 />
               </div>
             </div>
+
+            {isAllSetsComplete && !currentDayCompletedToday && (
+              <button
+                type="button"
+                onClick={handleToggleDayCompletion}
+                disabled={completingDay}
+                className={`${styles.buttonPrimaryWorkout} mt-4 flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50`}
+              >
+                {completingDay ? (
+                  <>
+                    <RefreshCw size={20} className="animate-spin" />
+                    Completing...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={20} />
+                    Complete Workout
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           <ClientUnreadRepliesBanner clientId={client.id} />
@@ -1709,7 +1755,7 @@ activeExercise.exercise_details?.alternate && (
                               : "Progression suggestion"}
                           </p>
                           <p className="mt-1 text-sm text-ink-muted">
-                            I feel like you can lift heavier this week; let's try {activeProgressionSuggestion.suggestedWeight}kg.
+                            I feel like you can lift heavier this week; let&apos;s try {activeProgressionSuggestion.suggestedWeight}kg.
                             You completed your last {activeProgressionSuggestion.sessionsAtWeight} sessions at {activeProgressionSuggestion.lastWeight}kg.
                           </p>
                         </div>
@@ -1925,17 +1971,6 @@ activeExercise.exercise_details?.alternate && (
             )}
           </div>
 
-          <MessageTrainerBox
-            clientId={client.id}
-            contextType="workout_day"
-            contextId={currentDay.id}
-            contextLabel={currentDay.day_name || "Workout day"}
-            title="Workout note"
-            placeholder="How did this workout feel? Anything your trainer should know?"
-            accent="workout"
-            showRecentMessages={false}
-          />
-
           {/* Add Custom Exercise Section */}
           {!showAddExercise ? (
             <button
@@ -2024,6 +2059,17 @@ activeExercise.exercise_details?.alternate && (
               </form>
             </div>
           )}
+
+          <MessageTrainerBox
+            clientId={client.id}
+            contextType="workout_day"
+            contextId={currentDay.id}
+            contextLabel={currentDay.day_name || "Workout day"}
+            title="Workout note"
+            placeholder="How did this workout feel? Anything your trainer should know?"
+            accent="workout"
+            showRecentMessages={false}
+          />
 
           <button
             onClick={handleToggleDayCompletion}

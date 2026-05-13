@@ -53,6 +53,7 @@ const ratingFields = [
 type RatingKey = (typeof ratingFields)[number]["key"];
 
 type Ratings = Record<RatingKey, string>;
+type Sex = "male" | "female";
 
 const emptyRatings: Ratings = {
   energy_level: "",
@@ -98,7 +99,7 @@ function calculateBmr({
   heightCm,
   age,
 }: {
-  sex: string;
+  sex: Sex;
   weightKg: number;
   heightCm: number;
   age: number;
@@ -107,6 +108,12 @@ function calculateBmr({
     return 88.362 + 13.397 * weightKg + 4.799 * heightCm - 5.677 * age;
   }
 
+  if (sex === "female") {
+    return 447.593 + 9.247 * weightKg + 3.098 * heightCm - 4.33 * age;
+  }
+
+  // This should be unreachable because onboarding only offers male/female.
+  // Keep a conservative fallback so a future option cannot silently use the male equation.
   return 447.593 + 9.247 * weightKg + 3.098 * heightCm - 4.33 * age;
 }
 
@@ -364,7 +371,7 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
     }
 
     const bmr = calculateBmr({
-      sex,
+      sex: sex as Sex,
       weightKg: weightNumber,
       heightCm: heightNumber,
       age,

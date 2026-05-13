@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { todayStr } from "@/lib/dates";
 
 // =====================================================================
 // Types
@@ -17,6 +18,8 @@ export type CompanionPath = {
   unlock_requirement_type?: CompanionUnlockRequirementType | null;
   unlock_requirement_target?: number | null;
   unlock_label?: string | null;
+  available_from?: string | null;
+  available_until?: string | null;
 };
 
 export type CompanionType = "power" | "fuel" | "spirit";
@@ -68,6 +71,7 @@ export type CompanionLine = {
   companion_slug: string | null;
   category: string;
   text: string;
+  min_form_number?: number | null;
 };
 
 // Convenience type that bundles the active companion with its path and form data.
@@ -78,8 +82,48 @@ export type ActiveCompanionView = {
   currentForm: CompanionForm;
   nextForm: CompanionForm | null;
   xpToNextForm: number | null;
+  xpToMastery: number | null;
+  masteryXpRequired: number;
   progressPct: number; // 0–100, progress within the current form's range
   isMaxForm: boolean;
+};
+
+export const getCompanionDisplayName = (
+  view: ActiveCompanionView | null
+): string | null => {
+  if (!view) return null;
+
+  return (
+    view.companion.custom_name ??
+    view.path.default_name ??
+    view.path.name ??
+    null
+  );
+};
+
+const isGoblinCompanion = (view: ActiveCompanionView) => {
+  const searchable = [
+    view.path.slug,
+    view.path.name,
+    view.path.default_name,
+    view.currentForm.name,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return /\b(goblin|greg)\b/i.test(searchable);
+};
+
+export const personalizeCompanionLine = (
+  line: string | null,
+  view: ActiveCompanionView | null
+): string | null => {
+  if (!line || !view || !isGoblinCompanion(view)) return line;
+
+  const displayName = getCompanionDisplayName(view);
+  if (!displayName) return line;
+
+  return line.replace(/\bGreg\b/g, displayName);
 };
 
 export type CompanionCollectionItem = {
@@ -169,6 +213,15 @@ export const getFormsForPath = async (
 
   if (error || !data) return [];
   return data as CompanionForm[];
+};
+
+const isPathSeasonallyVisible = (path: CompanionPath, today: string) => {
+  const startsInFuture =
+    Boolean(path.available_from) && (path.available_from as string) > today;
+  const endedInPast =
+    Boolean(path.available_until) && (path.available_until as string) < today;
+
+  return !startsInFuture && !endedInPast;
 };
 
 const getDifferentRecipeCount = async (clientId: string) => {
@@ -263,10 +316,16 @@ export const listCompanionCollection = async (
   const companionByPathId = new Map(
     companions.map((companion) => [companion.path_id, companion])
   );
+  const today = todayStr();
 
-  const items = await Promise.all(
+  const items: Array<CompanionCollectionItem | null> = await Promise.all(
     paths.map(async (path) => {
       const companion = companionByPathId.get(path.id) ?? null;
+      const shouldShowPath =
+        Boolean(companion) || isPathSeasonallyVisible(path, today);
+
+      if (!shouldShowPath) return null;
+
       const forms = await getFormsForPath(path.id);
       const previewForm = forms[0] ?? null;
 
@@ -304,12 +363,14 @@ export const listCompanionCollection = async (
     })
   );
 
-  return items.sort((a, b) => {
-    const orderA = a.path.display_order ?? 999;
-    const orderB = b.path.display_order ?? 999;
-    if (orderA !== orderB) return orderA - orderB;
-    return a.path.name.localeCompare(b.path.name);
-  });
+  return items
+    .filter((item): item is CompanionCollectionItem => item !== null)
+    .sort((a, b) => {
+      const orderA = a.path.display_order ?? 999;
+      const orderB = b.path.display_order ?? 999;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.path.name.localeCompare(b.path.name);
+    });
 };
 
 // =====================================================================
@@ -363,14 +424,23 @@ export const getActiveCompanionView = async (
   const currentIndex = forms.findIndex((f) => f.id === currentForm.id);
   const nextForm = currentIndex < forms.length - 1 ? forms[currentIndex + 1] : null;
   const isMaxForm = nextForm === null;
+  const masteryXpRequired = forms[forms.length - 1].xp_required + 100;
 
   let xpToNextForm: number | null = null;
+  const xpToMastery = companion.is_mastered
+    ? null
+    : Math.max(0, masteryXpRequired - companion.xp);
   let progressPct = 100;
 
   if (nextForm) {
     xpToNextForm = nextForm.xp_required - companion.xp;
     const range = nextForm.xp_required - currentForm.xp_required;
     const within = companion.xp - currentForm.xp_required;
+    progressPct = range > 0 ? Math.min(100, Math.max(0, (within / range) * 100)) : 0;
+  } else if (!companion.is_mastered) {
+    const finalFormXp = currentForm.xp_required;
+    const range = masteryXpRequired - finalFormXp;
+    const within = companion.xp - finalFormXp;
     progressPct = range > 0 ? Math.min(100, Math.max(0, (within / range) * 100)) : 0;
   }
 
@@ -380,6 +450,8 @@ export const getActiveCompanionView = async (
     currentForm,
     nextForm,
     xpToNextForm,
+    xpToMastery,
+    masteryXpRequired,
     progressPct,
     isMaxForm,
   };
@@ -474,10 +546,23 @@ export type AwardXpResult = {
   awarded: number;
   newXp: number;
   leveledUp: boolean;
+  oldFormName: string | null;
+  oldFormImageUrl: string | null;
   newFormName: string | null;
   newFormImageUrl: string | null;
   becameMastered: boolean;
 };
+
+export const COMPANION_XP_REWARDS = {
+  chooseCompanion: 10,
+  nameCompanion: 10,
+  weeklyCheckInComplete: 100,
+  stepsTargetHit: 5,
+  waterTargetHit: 5,
+  loggedMeal: 3,
+  firstProgressPhotos: 30,
+  milestoneComplete: 50,
+} as const;
 
 // The headline mutation. Awards Bond XP to the client's active companion,
 // records an event, and returns level-up info so callers can celebrate.
@@ -502,6 +587,7 @@ export const awardBondXp = async (
   if (!view) return null; // No active companion, nothing to award to.
 
   const oldFormNumber = view.currentForm.form_number;
+  const oldForm = view.currentForm;
   const oldXp = view.companion.xp;
   const newXp = oldXp + amount;
 
@@ -534,8 +620,11 @@ export const awardBondXp = async (
   const newForm = forms.find((f) => f.form_number === newFormNumber) ?? null;
 
   // Check for mastery — reaching the highest form marks as mastered.
-  const isHighestForm = newFormNumber === forms[forms.length - 1].form_number;
-  const becameMastered = isHighestForm && !view.companion.is_mastered;
+  // Mastery sits one XP step after the final visual transformation.
+  const finalForm = forms[forms.length - 1];
+  const masteryXpRequired = finalForm.xp_required + 100;
+  const becameMastered =
+    newXp >= masteryXpRequired && !view.companion.is_mastered;
 
   if (becameMastered) {
     await supabase
@@ -548,12 +637,22 @@ export const awardBondXp = async (
     awarded: amount,
     newXp,
     leveledUp,
-    newFormName: leveledUp ? newForm?.name ?? null : null,
-    newFormImageUrl: leveledUp ? newForm?.image_url ?? null : null,
+    oldFormName: leveledUp ? oldForm.name : null,
+    oldFormImageUrl: leveledUp ? oldForm.image_url : null,
+    newFormName: leveledUp
+      ? newForm?.name ?? null
+      : becameMastered
+      ? "Companion mastered"
+      : null,
+    newFormImageUrl: leveledUp
+      ? newForm?.image_url ?? null
+      : becameMastered
+      ? finalForm.image_url
+      : null,
     becameMastered,
   };
 
-  if (leveledUp && typeof window !== "undefined") {
+  if ((leveledUp || becameMastered) && typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent("companion:evolved", {
         detail: result,
@@ -573,16 +672,23 @@ export const awardBondXp = async (
 // Falls back to null if there are no lines at all.
 export const getRandomLine = async (
   companionSlug: string,
-  category: string = "general"
+  category: string = "general",
+  maxFormNumber?: number
 ): Promise<string | null> => {
   // Try the requested category first.
   const tryFetch = async (cat: string) => {
-    const { data, error } = await supabase
+    let query = supabase
       .from("companion_lines")
-      .select("text")
+      .select("text, min_form_number")
       .eq("companion_slug", companionSlug)
       .eq("category", cat)
       .eq("is_active", true);
+
+    if (maxFormNumber !== undefined) {
+      query = query.lte("min_form_number", maxFormNumber);
+    }
+
+    const { data, error } = await query;
 
     if (error || !data || data.length === 0) return null;
     return data[Math.floor(Math.random() * data.length)].text as string;

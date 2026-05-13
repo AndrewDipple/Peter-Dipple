@@ -24,6 +24,8 @@ type ThisWeekWorkoutsProps = {
   selectedDayId?: string | null;
   onSelectDay?: (dayId: string) => void;
   showOpenWorkoutLink?: boolean;
+  embedded?: boolean;
+  metaLabel?: string | null;
 };
 
 export default function ThisWeekWorkouts({
@@ -34,6 +36,8 @@ export default function ThisWeekWorkouts({
   selectedDayId = null,
   onSelectDay,
   showOpenWorkoutLink = true,
+  embedded = false,
+  metaLabel = null,
 }: ThisWeekWorkoutsProps) {
   if (days.length === 0) return null;
 
@@ -41,12 +45,20 @@ export default function ThisWeekWorkouts({
     (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
   );
 
-  return (
-    <div className={styles.card}>
+  const content = (
+    <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className={styles.h2}>This Week&apos;s Workouts</h2>
-          <p className="mt-1 text-sm text-ink-muted">{formatWeekLabel(weekStart)}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+            <span>{formatWeekLabel(weekStart)}</span>
+            {metaLabel && (
+              <>
+                <span aria-hidden="true">|</span>
+                <span>{metaLabel}</span>
+              </>
+            )}
+          </div>
         </div>
         {showOpenWorkoutLink && (
           <Link
@@ -118,6 +130,14 @@ export default function ThisWeekWorkouts({
           );
         })}
       </div>
+    </>
+  );
+
+  if (embedded) return <div>{content}</div>;
+
+  return (
+    <div className={styles.card}>
+      {content}
     </div>
   );
 }

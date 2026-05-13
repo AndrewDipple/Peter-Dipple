@@ -6,6 +6,7 @@ import { styles } from "@/lib/design";
 import { addDays, formatWeekLabel, getMondayOf } from "@/lib/dates";
 import {
   awardBondXp,
+  COMPANION_XP_REWARDS,
   getActiveCompanionView,
   isCompanionEnabledForClient,
   type ActiveCompanionView,
@@ -161,7 +162,7 @@ export default function WeeklyCheckInCard({
     setCompleted(true);
     await awardBondXp(
       clientId,
-      25,
+      COMPANION_XP_REWARDS.weeklyCheckInComplete,
       `weekly_check_in_${weekStart}`,
       "Submitted weekly check-in"
     );
