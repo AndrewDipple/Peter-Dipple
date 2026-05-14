@@ -27,6 +27,7 @@ import GuideLink from "@/components/GuideLink";
 import { RefreshCw, Plus, Undo2, CheckCircle2, XCircle } from "lucide-react";
 import {
   createOfflineId,
+  getOfflineWorkoutQueue,
   getOfflineWorkoutQueueCount,
   queueOfflineWorkoutItem,
   removeQueuedCompletion,
@@ -88,6 +89,7 @@ type ClientProgramDayExercise = {
   sort_order: number | null;
   original_exercise_id: string | null;
   is_custom: boolean;
+  is_archived?: boolean | null;
   exercise_details?: Exercise | null;
 };
 
@@ -243,6 +245,7 @@ export default function ClientWorkoutPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [completingDay, setCompletingDay] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [offlineRecoveryCopied, setOfflineRecoveryCopied] = useState(false);
   const [syncingOfflineQueue, setSyncingOfflineQueue] = useState(false);
   const [isBrowserOffline, setIsBrowserOffline] = useState(false);
   const [debugMessage, setDebugMessage] = useState("");
@@ -278,6 +281,18 @@ export default function ClientWorkoutPage() {
   };
 
   const queueCreatedAt = () => new Date().toISOString();
+
+  const copyOfflineRecoveryData = async () => {
+    const recoveryData = JSON.stringify(getOfflineWorkoutQueue(), null, 2);
+
+    try {
+      await navigator.clipboard.writeText(recoveryData);
+      setOfflineRecoveryCopied(true);
+      window.setTimeout(() => setOfflineRecoveryCopied(false), 2500);
+    } catch {
+      window.prompt("Copy this workout recovery data", recoveryData);
+    }
+  };
 
   const canTryNetworkWrite = () =>
     typeof navigator === "undefined" || navigator.onLine;
@@ -588,18 +603,66 @@ export default function ClientWorkoutPage() {
         return;
       }
 
+      const allExerciseRecordIds = exerciseData.map((e) => e.id);
+      const { data: allSetLogData, error: setLogError } =
+        allExerciseRecordIds.length > 0
+          ? await supabase
+              .from("client_program_set_logs")
+              .select("*")
+              .eq("client_id", client.id)
+              .eq("client_program_id", clientProgram.id)
+              .eq("client_program_day_id", selectedDay.id)
+              .eq("log_date", today)
+              .in("client_program_day_exercise_id", allExerciseRecordIds)
+          : { data: [], error: null };
+
+      const queuedExerciseIds = new Set(
+        getOfflineWorkoutQueue()
+          .filter(
+            (item) =>
+              item.type === "set_log_upsert" &&
+              item.payload.client_id === client.id &&
+              item.payload.client_program_id === clientProgram.id &&
+              item.payload.client_program_day_id === selectedDay.id &&
+              item.payload.log_date === today
+          )
+          .map((item) =>
+            item.type === "set_log_upsert"
+              ? item.payload.client_program_day_exercise_id
+              : ""
+          )
+      );
+
+      const loggedExerciseIds = new Set(
+        ((allSetLogData ?? []) as ClientProgramSetLog[]).map(
+          (log) => log.client_program_day_exercise_id
+        )
+      );
+      const visibleExerciseData = exerciseData.filter(
+        (exercise) =>
+          !exercise.is_archived ||
+          loggedExerciseIds.has(exercise.id) ||
+          queuedExerciseIds.has(exercise.id)
+      );
+
+      if (visibleExerciseData.length === 0) {
+        setDayExercises([]);
+        setSetLogs([]);
+        return;
+      }
+
       // Get all exercise IDs and names so older rows without exercise_id still
       // receive video/rest/alternative data from the exercises table.
-      const exerciseIds = exerciseData
+      const exerciseIds = visibleExerciseData
         .map((e) => e.exercise_id)
         .filter(Boolean) as string[];
-      const originalExerciseIds = exerciseData
+      const originalExerciseIds = visibleExerciseData
         .map((e) => e.original_exercise_id)
         .filter(Boolean) as string[];
       const allExerciseIds = [...new Set([...exerciseIds, ...originalExerciseIds])];
       const exerciseNames = Array.from(
         new Set(
-          exerciseData
+          visibleExerciseData
             .map((e) => e.exercise_name?.trim())
             .filter(Boolean)
         )
@@ -639,7 +702,7 @@ export default function ClientWorkoutPage() {
         }
       }
 
-      const enrichedExercises = exerciseData.map((ex) => ({
+      const enrichedExercises = visibleExerciseData.map((ex) => ({
         ...ex,
         exercise_details:
           (ex.exercise_id ? exerciseDetailsMap[ex.exercise_id] : null) ||
@@ -664,14 +727,9 @@ export default function ClientWorkoutPage() {
       const exerciseRecordIds = enrichedExercises.map((e) => e.id);
 
       if (exerciseRecordIds.length > 0) {
-        const { data: setLogData, error: setLogError } = await supabase
-          .from("client_program_set_logs")
-          .select("*")
-          .eq("client_id", client.id)
-          .eq("client_program_id", clientProgram.id)
-          .eq("client_program_day_id", selectedDay.id)
-          .eq("log_date", today)
-          .in("client_program_day_exercise_id", exerciseRecordIds);
+        const setLogData = ((allSetLogData ?? []) as ClientProgramSetLog[]).filter(
+          (log) => exerciseRecordIds.includes(log.client_program_day_exercise_id)
+        );
 
         if (!setLogError && setLogData) {
           setSetLogs(setLogData);
@@ -1882,18 +1940,27 @@ export default function ClientWorkoutPage() {
             </div>
 
             {!isBrowserOffline && offlineQueueCount > 0 && (
-              <button
-                type="button"
-                onClick={syncQueuedWorkoutChanges}
-                disabled={syncingOfflineQueue}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-3 py-2 text-sm font-semibold text-ink hover:bg-gold/90 disabled:opacity-60"
-              >
-                <RefreshCw
-                  size={16}
-                  className={syncingOfflineQueue ? "animate-spin" : ""}
-                />
-                Sync now
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={copyOfflineRecoveryData}
+                  className="inline-flex items-center justify-center rounded-lg border border-gold/50 bg-white/70 px-3 py-2 text-sm font-semibold text-ink hover:bg-white"
+                >
+                  {offlineRecoveryCopied ? "Copied" : "Copy recovery data"}
+                </button>
+                <button
+                  type="button"
+                  onClick={syncQueuedWorkoutChanges}
+                  disabled={syncingOfflineQueue}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-gold px-3 py-2 text-sm font-semibold text-ink hover:bg-gold/90 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={16}
+                    className={syncingOfflineQueue ? "animate-spin" : ""}
+                  />
+                  Sync now
+                </button>
+              </div>
             )}
           </div>
         </div>

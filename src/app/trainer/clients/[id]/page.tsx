@@ -787,16 +787,11 @@ if (clientData) {
 
       if (!clientProgram) return;
 
-      const dayStart = `${selectedDate}T00:00:00`;
-      const dayEnd = `${selectedDate}T23:59:59`;
-
       const { data: logsData } = await supabase
         .from("client_program_set_logs")
         .select("*")
         .eq("client_id", clientId)
-        .eq("client_program_id", clientProgram.id)
-        .gte("created_at", dayStart)
-        .lte("created_at", dayEnd)
+        .eq("log_date", selectedDate)
         .order("created_at", { ascending: true });
 
       const typedLogs = (logsData ?? []) as ClientProgramSetLog[];
@@ -823,7 +818,20 @@ if (clientData) {
 
       setReviewedDayId(resolvedDayId);
 
-      if (resolvedDayId) {
+      const loggedExerciseIds = [
+        ...new Set(
+          typedLogs.map((log) => log.client_program_day_exercise_id).filter(Boolean)
+        ),
+      ];
+
+      if (loggedExerciseIds.length > 0) {
+        const { data: loggedExercises } = await supabase
+          .from("client_program_day_exercises")
+          .select("*")
+          .in("id", loggedExerciseIds);
+
+        setDayExercises((loggedExercises ?? []) as ClientProgramDayExercise[]);
+      } else if (resolvedDayId) {
         const { data: assignedExercises } = await supabase
           .from("client_program_day_exercises")
           .select("*")
@@ -851,6 +859,15 @@ if (clientData) {
       .eq("client_id", clientId);
 
     if (existingPrograms?.length) {
+      const confirmed = window.confirm(
+        "This replaces the client's whole active programme. It is not for swapping one exercise, and it may remove existing programme progress depending on database links. Use Edit Active Programme for individual exercise changes. Continue?"
+      );
+
+      if (!confirmed) {
+        setAssigningTemplate(false);
+        return;
+      }
+
       await supabase.from("client_programs").delete().eq("client_id", clientId);
     }
 
@@ -1725,7 +1742,15 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                   )}
                 </div>
 
-                <div className="flex items-end">
+                <div className="flex flex-wrap items-end gap-2">
+                  {clientProgram && (
+                    <Link
+                      href={`/trainer/clients/${client.id}/workout`}
+                      className={styles.buttonSecondary}
+                    >
+                      Edit Active Programme
+                    </Link>
+                  )}
                   <button
                     onClick={handleAssignTemplate}
                     disabled={assigningTemplate}

@@ -165,9 +165,33 @@ export async function syncOfflineWorkoutQueue(supabase: SupabaseClient) {
       }
 
       if (item.type === "set_log_upsert") {
-        const { error } = await supabase.from("client_program_set_logs").insert([
-          item.payload,
-        ]);
+        const { data: existing, error: existingError } = await supabase
+          .from("client_program_set_logs")
+          .select("id")
+          .eq("client_id", item.payload.client_id)
+          .eq(
+            "client_program_day_exercise_id",
+            item.payload.client_program_day_exercise_id
+          )
+          .eq("log_date", item.payload.log_date)
+          .eq("set_number", item.payload.set_number)
+          .maybeSingle();
+
+        if (existingError) throw existingError;
+
+        const { error } = existing?.id
+          ? await supabase
+              .from("client_program_set_logs")
+              .update({
+                actual_weight_kg: item.payload.actual_weight_kg,
+                actual_reps: item.payload.actual_reps,
+                completed: item.payload.completed,
+                weight_logging_mode: item.payload.weight_logging_mode ?? null,
+              })
+              .eq("id", existing.id)
+          : await supabase.from("client_program_set_logs").insert([
+              item.payload,
+            ]);
 
         if (error) throw error;
       }
