@@ -123,6 +123,14 @@ export default function WeeklyCheckInCard({
     setSaving(true);
 
     try {
+      const checkInRatings = {
+        energy_level: Number(ratings.energy_level),
+        hunger_level: Number(ratings.hunger_level),
+        motivation_level: Number(ratings.motivation_level),
+        soreness_level: Number(ratings.soreness_level),
+        sleep_quality: Number(ratings.sleep_quality),
+      };
+
       const { error: weightError } = await supabase
         .from("client_weight_logs")
         .insert({
@@ -140,11 +148,7 @@ export default function WeeklyCheckInCard({
           week_start: weekStart,
           weight_kg: parsedWeight,
           photos_uploaded: false,
-          energy_level: Number(ratings.energy_level),
-          hunger_level: Number(ratings.hunger_level),
-          motivation_level: Number(ratings.motivation_level),
-          soreness_level: Number(ratings.soreness_level),
-          sleep_quality: Number(ratings.sleep_quality),
+          ...checkInRatings,
           notes: notes.trim() || null,
           submitted_at: new Date().toISOString(),
         },
@@ -152,6 +156,38 @@ export default function WeeklyCheckInCard({
       );
 
       if (error) throw error;
+
+      const { error: notificationError } = await supabase.rpc(
+        "notify_staff_weekly_check_in",
+        {
+          p_client_id: clientId,
+          p_week_start: weekStart,
+        }
+      );
+
+      if (notificationError) {
+        console.error("Weekly check-in notification failed:", notificationError);
+      }
+
+      const { error: alertNotificationError } = await supabase.rpc(
+        "notify_staff_weekly_check_in_alerts",
+        {
+          p_client_id: clientId,
+          p_week_start: weekStart,
+          p_energy_level: checkInRatings.energy_level,
+          p_hunger_level: checkInRatings.hunger_level,
+          p_motivation_level: checkInRatings.motivation_level,
+          p_soreness_level: checkInRatings.soreness_level,
+          p_sleep_quality: checkInRatings.sleep_quality,
+        }
+      );
+
+      if (alertNotificationError) {
+        console.error(
+          "Weekly check-in alert notification failed:",
+          alertNotificationError
+        );
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
       alert(`Check-in could not be saved: ${message}`);

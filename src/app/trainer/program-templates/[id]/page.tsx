@@ -44,6 +44,11 @@ type ExerciseLibraryItem = {
   primary_equipment: string | null;
 };
 
+type RemovedExercise = {
+  dayId: string;
+  exercise: ProgramTemplateExercise;
+};
+
 const workoutLocationOptions = [
   { value: "gym", label: "Gym" },
   { value: "home_weights", label: "Home weights" },
@@ -94,11 +99,14 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [reorderingDayId, setReorderingDayId] = useState<string | null>(null);
   const [reorderingDays, setReorderingDays] = useState(false);
 
-const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
-
-const [editExerciseValues, setEditExerciseValues] = useState<
-  Record<string, { sets: string; reps: string; weight: string }>
->({});
+  const [editingExerciseId, setEditingExerciseId] = useState<string | null>(
+    null
+  );
+  const [editExerciseValues, setEditExerciseValues] = useState<
+    Record<string, { name: string; sets: string; reps: string; weight: string }>
+  >({});
+  const [removedExercise, setRemovedExercise] =
+    useState<RemovedExercise | null>(null);
 
   const sortedDays = useMemo(() => {
     return [...days].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -461,6 +469,12 @@ const [editExerciseValues, setEditExerciseValues] = useState<
   };
 
   const handleRemoveExercise = async (exerciseId: string, dayId: string) => {
+    const exerciseToRemove = (exercisesByDay[dayId] ?? []).find(
+      (exercise) => exercise.id === exerciseId
+    );
+
+    if (!exerciseToRemove) return;
+
     const { error } = await supabase
       .from("program_template_exercises")
       .delete()
@@ -477,6 +491,39 @@ const [editExerciseValues, setEditExerciseValues] = useState<
         (exercise) => exercise.id !== exerciseId
       ),
     }));
+    setRemovedExercise({ dayId, exercise: exerciseToRemove });
+  };
+
+  const handleUndoRemoveExercise = async () => {
+    if (!removedExercise) return;
+
+    const { data, error } = await supabase
+      .from("program_template_exercises")
+      .insert({
+        id: removedExercise.exercise.id,
+        program_template_day_id: removedExercise.exercise.program_template_day_id,
+        exercise_name: removedExercise.exercise.exercise_name,
+        sets: removedExercise.exercise.sets,
+        reps: removedExercise.exercise.reps,
+        target_weight_kg: removedExercise.exercise.target_weight_kg,
+        sort_order: removedExercise.exercise.sort_order,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Could not restore exercise");
+      return;
+    }
+
+    setExercisesByDay((prev) => ({
+      ...prev,
+      [removedExercise.dayId]: sortExercises([
+        ...(prev[removedExercise.dayId] ?? []),
+        data as ProgramTemplateExercise,
+      ]),
+    }));
+    setRemovedExercise(null);
   };
 
   const persistExerciseOrder = async (
@@ -560,65 +607,66 @@ const [editExerciseValues, setEditExerciseValues] = useState<
 
     await reorderExercise(dayId, exerciseId, targetExercise.id);
   };
-const handleStartEditExercise = (exercise: ProgramTemplateExercise) => {
-  setEditingExerciseId(exercise.id);
 
-  setEditExerciseValues((prev) => ({
-    ...prev,
-    [exercise.id]: {
-      sets: exercise.sets ? String(exercise.sets) : "",
-      reps: exercise.reps ?? "",
-      weight:
-        exercise.target_weight_kg !== null &&
-        exercise.target_weight_kg !== undefined
-          ? String(exercise.target_weight_kg)
-          : "",
-    },
-  }));
-};
+  const handleStartEditExercise = (exercise: ProgramTemplateExercise) => {
+    setEditingExerciseId(exercise.id);
 
-const handleCancelEditExercise = (id: string) => {
-  setEditingExerciseId(null);
+    setEditExerciseValues((prev) => ({
+      ...prev,
+      [exercise.id]: {
+        name: exercise.exercise_name ?? "",
+        sets: exercise.sets ? String(exercise.sets) : "",
+        reps: exercise.reps ?? "",
+        weight:
+          exercise.target_weight_kg !== null &&
+          exercise.target_weight_kg !== undefined
+            ? String(exercise.target_weight_kg)
+            : "",
+      },
+    }));
+  };
 
-  setEditExerciseValues((prev) => {
-    const next = { ...prev };
-    delete next[id];
-    return next;
-  });
-};
+  const handleCancelEditExercise = (id: string) => {
+    setEditingExerciseId(null);
 
-const handleSaveExerciseEdit = async (
-  exercise: ProgramTemplateExercise,
-  dayId: string
-) => {
-  const values = editExerciseValues[exercise.id];
-  if (!values) return;
+    setEditExerciseValues((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
 
-  const { data, error } = await supabase
-    .from("program_template_exercises")
-    .update({
-      sets: values.sets ? Number(values.sets) : null,
-      reps: values.reps || null,
-      target_weight_kg: values.weight ? Number(values.weight) : null,
-    })
-    .eq("id", exercise.id)
-    .select()
-    .single();
+  const handleSaveExerciseEdit = async (
+    exercise: ProgramTemplateExercise,
+    dayId: string
+  ) => {
+    const values = editExerciseValues[exercise.id];
+    if (!values) return;
 
-  if (error || !data) {
-    alert("Error saving exercise");
-    return;
-  }
+    const { data, error } = await supabase
+      .from("program_template_exercises")
+      .update({
+        exercise_name: values.name.trim() || exercise.exercise_name,
+        sets: values.sets ? Number(values.sets) : null,
+        reps: values.reps || null,
+        target_weight_kg: values.weight ? Number(values.weight) : null,
+      })
+      .eq("id", exercise.id)
+      .select()
+      .single();
 
-  setExercisesByDay((prev) => ({
-    ...prev,
-    [dayId]: prev[dayId].map((e) =>
-      e.id === exercise.id ? data : e
-    ),
-  }));
+    if (error || !data) {
+      alert("Error saving exercise");
+      return;
+    }
 
-  handleCancelEditExercise(exercise.id);
-};
+    setExercisesByDay((prev) => ({
+      ...prev,
+      [dayId]: prev[dayId].map((e) => (e.id === exercise.id ? data : e)),
+    }));
+
+    handleCancelEditExercise(exercise.id);
+  };
 
   return (
     <>
@@ -630,6 +678,30 @@ const handleSaveExerciseEdit = async (
           {template?.name || "Programme Template"}
         </h1>
       </div>
+
+      {removedExercise && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-gold bg-gold/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-ink">
+            Removed {removedExercise.exercise.exercise_name ?? "exercise"}.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleUndoRemoveExercise}
+              className={styles.buttonPrimary}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              onClick={() => setRemovedExercise(null)}
+              className={styles.buttonSecondary}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className={styles.body}>Loading template...</p>
@@ -984,6 +1056,7 @@ dayExercises.map((exercise, index) => {
   const isEditing = editingExerciseId === exercise.id;
 
   const values = editExerciseValues[exercise.id] ?? {
+    name: exercise.exercise_name ?? "",
     sets:
       exercise.sets !== null && exercise.sets !== undefined
         ? String(exercise.sets)
@@ -1102,6 +1175,25 @@ dayExercises.map((exercise, index) => {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
+            <div className="md:col-span-3">
+              <label className="text-sm font-medium text-ink">
+                Exercise
+              </label>
+              <input
+                value={values.name}
+                onChange={(e) =>
+                  setEditExerciseValues((prev) => ({
+                    ...prev,
+                    [exercise.id]: {
+                      ...values,
+                      name: e.target.value,
+                    },
+                  }))
+                }
+                className={styles.input}
+              />
+            </div>
+
             <div>
               <label className="text-sm font-medium text-ink">
                 Sets

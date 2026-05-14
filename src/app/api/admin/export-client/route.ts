@@ -135,6 +135,108 @@ function normalizeProgressPhotoPath(path: unknown) {
   return trimmed.startsWith("http") ? null : trimmed;
 }
 
+function csvEscape(value: unknown) {
+  if (value === null || value === undefined) return "";
+
+  const stringValue =
+    typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
+
+  return `"${stringValue.replaceAll('"', '""')}"`;
+}
+
+function flattenObject(
+  value: unknown,
+  prefix = ""
+): Array<{ field: string; value: unknown }> {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value !== "object" ||
+    value instanceof Date
+  ) {
+    return [{ field: prefix || "value", value }];
+  }
+
+  if (Array.isArray(value)) {
+    return [{ field: prefix || "value", value }];
+  }
+
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, entry]) =>
+      flattenObject(entry, prefix ? `${prefix}.${key}` : key)
+  );
+}
+
+function buildLongFormCsv(payload: {
+  export_type: string;
+  exported_at: string;
+  exported_by: string;
+  client: Record<string, unknown>;
+  auth_user: Record<string, unknown> | null;
+  tables: Record<string, unknown[] | { error: string }>;
+  progress_photo_access: {
+    expires_in_seconds: number;
+    expires_note: string;
+    photos: Array<Record<string, unknown>>;
+  };
+  notes: string[];
+}) {
+  const rows: string[] = [
+    ["section", "row_index", "field", "value"].map(csvEscape).join(","),
+  ];
+
+  const addRecord = (
+    section: string,
+    rowIndex: number,
+    record: Record<string, unknown>
+  ) => {
+    flattenObject(record).forEach(({ field, value }) => {
+      rows.push(
+        [section, rowIndex, field, value].map(csvEscape).join(",")
+      );
+    });
+  };
+
+  addRecord("export", 0, {
+    export_type: payload.export_type,
+    exported_at: payload.exported_at,
+    exported_by: payload.exported_by,
+  });
+  addRecord("client", 0, payload.client);
+  if (payload.auth_user) addRecord("auth_user", 0, payload.auth_user);
+
+  Object.entries(payload.tables).forEach(([tableName, tableRows]) => {
+    if (!Array.isArray(tableRows)) {
+      addRecord(`table:${tableName}`, 0, tableRows);
+      return;
+    }
+
+    if (tableRows.length === 0) {
+      addRecord(`table:${tableName}`, 0, { empty: true });
+      return;
+    }
+
+    tableRows.forEach((row, index) => {
+      addRecord(`table:${tableName}`, index + 1, row as Record<string, unknown>);
+    });
+  });
+
+  addRecord("progress_photo_access", 0, {
+    expires_in_seconds: payload.progress_photo_access.expires_in_seconds,
+    expires_note: payload.progress_photo_access.expires_note,
+  });
+
+  payload.progress_photo_access.photos.forEach((photo, index) => {
+    addRecord("progress_photo", index + 1, photo);
+  });
+
+  payload.notes.forEach((note, index) => {
+    addRecord("note", index + 1, { note });
+  });
+
+  return rows.join("\r\n");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const adminContext = await requireAdmin(request);
@@ -144,7 +246,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { supabaseAdmin, user } = adminContext;
-    const { clientId, note } = await request.json();
+    const { clientId, note, format } = await request.json();
+    const exportFormat = format === "csv" ? "csv" : "json";
 
     if (typeof clientId !== "string" || !clientId) {
       return NextResponse.json({ error: "Missing client id" }, { status: 400 });
@@ -269,7 +372,8 @@ export async function POST(request: NextRequest) {
       ],
     };
 
-    const fileName = `sar-${safeFilePart(client.full_name || client.email || client.id)}.json`;
+    const fileBaseName = `sar-${safeFilePart(client.full_name || client.email || client.id)}`;
+    const fileName = `${fileBaseName}.${exportFormat}`;
 
     await recordAdminAuditEvent(supabaseAdmin, {
       eventType: "sar_exported",
@@ -278,12 +382,23 @@ export async function POST(request: NextRequest) {
       targetProfileId: client.profile_id,
       metadata: {
         fileName,
+        format: exportFormat,
         tableCount: Object.keys(tableExports).length,
         progressPhotoCount: progressPhotos?.length ?? 0,
         signedProgressPhotoCount: signedUrlByPath.size,
         note: auditNote,
       },
     });
+
+    if (exportFormat === "csv") {
+      return new NextResponse(buildLongFormCsv(exportPayload), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${fileName}"`,
+        },
+      });
+    }
 
     return new NextResponse(JSON.stringify(exportPayload, null, 2), {
       status: 200,

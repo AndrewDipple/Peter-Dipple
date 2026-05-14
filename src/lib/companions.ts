@@ -673,7 +673,8 @@ export const awardBondXp = async (
 export const getRandomLine = async (
   companionSlug: string,
   category: string = "general",
-  maxFormNumber?: number
+  maxFormNumber?: number,
+  options: { fallbackToGeneral?: boolean } = {}
 ): Promise<string | null> => {
   // Try the requested category first.
   const tryFetch = async (cat: string) => {
@@ -694,7 +695,12 @@ export const getRandomLine = async (
     return data[Math.floor(Math.random() * data.length)].text as string;
   };
 
-  return (await tryFetch(category)) ?? (await tryFetch("general"));
+  const categoryLine = await tryFetch(category);
+  if (categoryLine) return categoryLine;
+
+  if (options.fallbackToGeneral === false) return null;
+
+  return tryFetch("general");
 };
 
 // =====================================================================

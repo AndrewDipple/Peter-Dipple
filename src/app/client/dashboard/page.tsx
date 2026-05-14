@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
@@ -42,6 +42,62 @@ type Client = {
   terms_version?: string | null;
   privacy_version?: string | null;
 };
+
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-surface-sunken ${className}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="w-full min-w-0 space-y-4" aria-label="Loading dashboard">
+      <div className={`${styles.card} min-w-0`}>
+        <SkeletonBlock className="h-7 w-2/3 max-w-sm" />
+        <SkeletonBlock className="mt-3 h-4 w-52" />
+        <SkeletonBlock className="mt-5 h-10 w-48" />
+      </div>
+
+      <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
+        <div className="rounded-lg bg-surface-sunken p-5 shadow-subtle">
+          <SkeletonBlock className="h-4 w-32 bg-surface" />
+          <SkeletonBlock className="mt-3 h-7 w-44 bg-surface" />
+          <SkeletonBlock className="mt-4 h-2 w-full bg-surface" />
+          <SkeletonBlock className="mt-5 h-10 w-32 bg-surface" />
+        </div>
+
+        <div className="rounded-lg bg-surface-sunken p-5 shadow-subtle">
+          <SkeletonBlock className="h-4 w-36 bg-surface" />
+          <SkeletonBlock className="mt-3 h-7 w-40 bg-surface" />
+          <div className="mt-5 grid gap-2 sm:grid-cols-3">
+            <SkeletonBlock className="h-16 bg-surface" />
+            <SkeletonBlock className="h-16 bg-surface" />
+            <SkeletonBlock className="h-16 bg-surface" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className={styles.card}>
+          <SkeletonBlock className="h-6 w-48" />
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <SkeletonBlock className="h-24" />
+            <SkeletonBlock className="h-24" />
+            <SkeletonBlock className="h-24" />
+          </div>
+        </div>
+
+        <div className={styles.card}>
+          <SkeletonBlock className="h-6 w-40" />
+          <SkeletonBlock className="mt-4 h-32 w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ClientProgram = {
   id: string;
@@ -154,6 +210,7 @@ const getNextWorkoutDay = (
 
 export default function ClientDashboardPage() {
   const router = useRouter();
+  const lastDashboardLoadAtRef = useRef(0);
 
   const [client, setClient] = useState<Client | null>(null);
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
@@ -279,6 +336,7 @@ const [showTour, setShowTour] = useState(false);
   };
 
   const loadDashboard = async () => {
+    lastDashboardLoadAtRef.current = Date.now();
     setLoading(true);
 
     const {
@@ -762,6 +820,8 @@ alert(`Week ${milestoneConfig.week_number} milestone complete! Great work!`);
   }, [today]);
 useEffect(() => {
   const handleVisibility = () => {
+    if (Date.now() - lastDashboardLoadAtRef.current < 3000) return;
+
     if (document.visibilityState === "visible") {
       loadDashboard();
     }
@@ -791,7 +851,7 @@ useEffect(() => {
         </div>
 
         {loading ? (
-          <p className={styles.body}>Loading dashboard...</p>
+          <DashboardSkeleton />
         ) : !client ? (
           <p className={styles.body}>Client not found.</p>
         ) : (

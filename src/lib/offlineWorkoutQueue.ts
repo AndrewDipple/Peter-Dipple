@@ -12,6 +12,7 @@ type SetLogPayload = {
   actual_weight_kg: number | null;
   actual_reps: number | null;
   completed: boolean;
+  weight_logging_mode?: "per_dumbbell" | "total" | null;
 };
 
 type ProgramStartPayload = {
@@ -41,10 +42,10 @@ export type OfflineWorkoutQueueItem =
       createdAt: string;
       payload: {
         id: string;
-        updates: Pick<
+        updates: Partial<Pick<
           SetLogPayload,
-          "actual_weight_kg" | "actual_reps" | "completed"
-        >;
+          "actual_weight_kg" | "actual_reps" | "completed" | "weight_logging_mode"
+        >>;
       };
     }
   | {

@@ -6,9 +6,11 @@ import { supabase } from "@/lib/supabase";
 import { getProgressPhotoPath, withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { styles } from "@/lib/design";
 import { awardBondXp, COMPANION_XP_REWARDS } from "@/lib/companions";
+import { getLoggedWeightMultiplier } from "@/lib/equipment";
+import type { WeightLoggingMode } from "@/lib/equipment";
 import GuideLink from "@/components/GuideLink";
 import { ChevronRight, Trash2, Trophy, TrendingUp, Sparkles, Weight, X } from "lucide-react";
-import { todayStr } from "@/lib/dates"
+import { addDays, todayStr } from "@/lib/dates";
 import {
   isCompanionEnabledForClient,
   getActiveCompanionView,
@@ -31,6 +33,7 @@ type Client = {
   id: string;
   full_name: string;
   profile_id: string | null;
+  daily_step_target: number | null;
 };
 
 type WeightLog = {
@@ -71,6 +74,14 @@ type MeasurementLog = {
   note: string | null;
 };
 
+type DailyTracking = {
+  id: string;
+  client_id: string;
+  log_date: string;
+  steps_logged: number | null;
+  water_completed: boolean | null;
+};
+
 type ExercisePR = {
   exercise_name: string;
   max_weight_kg: number;
@@ -94,6 +105,18 @@ type CompletedSetLog = {
   actual_reps: number;
   created_at: string;
   client_program_day_exercise_id: string;
+  weight_logging_mode?: WeightLoggingMode | null;
+};
+
+type ProgramExerciseSummary = {
+  id: string;
+  exercise_name: string | null;
+  exercise_id: string | null;
+};
+
+type EnrichedSetLog = CompletedSetLog & {
+  exercise_name?: string | null;
+  effective_weight_kg: number;
 };
 
 type PhotoFileFieldProps = {
@@ -122,6 +145,61 @@ function PhotoFileField({ id, label, file, onChange }: PhotoFileFieldProps) {
       >
         {file ? file.name : "Choose photo"}
       </label>
+    </div>
+  );
+}
+
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-surface-sunken ${className}`}
+    />
+  );
+}
+
+function StatsSkeleton() {
+  return (
+    <div className="mt-6 space-y-6" aria-label="Loading stats">
+      <div className={styles.card}>
+        <div className="flex items-center gap-2">
+          <SkeletonBlock className="h-6 w-6 rounded-full" />
+          <SkeletonBlock className="h-6 w-40" />
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <SkeletonBlock className="h-80" />
+          <SkeletonBlock className="h-80" />
+          <SkeletonBlock className="h-80" />
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-3">
+            <SkeletonBlock className="h-6 w-36" />
+            <SkeletonBlock className="h-4 w-48" />
+          </div>
+          <SkeletonBlock className="h-10 w-full md:w-64" />
+        </div>
+        <SkeletonBlock className="mt-6 h-64 w-full" />
+      </div>
+
+      <div className={styles.card}>
+        <SkeletonBlock className="h-6 w-40" />
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <SkeletonBlock className="h-12" />
+          <SkeletonBlock className="h-12" />
+          <SkeletonBlock className="h-12" />
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <SkeletonBlock className="h-6 w-44" />
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <SkeletonBlock className="aspect-[4/5]" />
+          <SkeletonBlock className="aspect-[4/5]" />
+          <SkeletonBlock className="aspect-[4/5]" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -172,8 +250,20 @@ export default function ClientStatsPage() {
   const [companionEnabled, setCompanionEnabled] = useState(false);
 const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
 const [companionLine, setCompanionLine] = useState<string | null>(null);
+  const [dailyTrackingDate, setDailyTrackingDate] = useState(() =>
+    addDays(todayStr(), -1)
+  );
+  const [dailyTrackingRecord, setDailyTrackingRecord] =
+    useState<DailyTracking | null>(null);
+  const [dailyStepsInput, setDailyStepsInput] = useState("");
+  const [dailyWaterCompleted, setDailyWaterCompleted] = useState(false);
+  const [loadingDailyTracking, setLoadingDailyTracking] = useState(false);
+  const [savingDailyTracking, setSavingDailyTracking] = useState(false);
+  const [dailyTrackingMessage, setDailyTrackingMessage] = useState<string | null>(
+    null
+  );
 
-const today = todayStr()
+const today = todayStr();
 
   const getPhotoUrl = (photo: ProgressPhoto) =>
     photo.signed_url ?? photo.image_url;
@@ -257,7 +347,8 @@ const today = todayStr()
           actual_weight_kg,
           actual_reps,
           created_at,
-          client_program_day_exercise_id
+          client_program_day_exercise_id,
+          weight_logging_mode
         `)
         .eq("client_id", clientId)
         .eq("completed", true)
@@ -269,6 +360,7 @@ const today = todayStr()
 
       const insights: PersonalBestInsight[] = [];
       const typedSetLogs = (setLogs ?? []) as CompletedSetLog[];
+      let enrichedLogs: EnrichedSetLog[] = [];
 
       if (typedSetLogs.length > 0) {
         // Get exercise names for these logs
@@ -278,22 +370,71 @@ const today = todayStr()
         
         const { data: exercises, error: exercisesError } = await supabase
           .from("client_program_day_exercises")
-          .select("id, exercise_name")
+          .select("id, exercise_name, exercise_id")
           .in("id", exerciseIds);
 
         if (exercisesError) throw exercisesError;
 
-        // Create a map of exercise_id to exercise_name
-        const exerciseMap = new Map(
-          exercises?.map((exercise) => [exercise.id, exercise.exercise_name]) || []
+        const programExercises = (exercises ?? []) as ProgramExerciseSummary[];
+        const { data: exerciseDetails } = await supabase
+          .from("exercises")
+          .select("id, name, primary_equipment");
+
+        const exerciseNameMap = new Map(
+          programExercises.map((exercise) => [exercise.id, exercise.exercise_name])
         );
-        const namedLogs = typedSetLogs
+        const programExerciseIdMap = new Map(
+          programExercises.map((exercise) => [exercise.id, exercise.exercise_id])
+        );
+        const equipmentByExerciseId = new Map(
+          exerciseDetails?.map((exercise) => [
+            exercise.id,
+            exercise.primary_equipment as string | null,
+          ]) || []
+        );
+        const equipmentByExerciseName = new Map(
+          exerciseDetails?.map((exercise) => [
+            exercise.name?.toLowerCase().trim(),
+            exercise.primary_equipment as string | null,
+          ]) || []
+        );
+
+        enrichedLogs = typedSetLogs.map((log) => {
+          const exerciseName = exerciseNameMap.get(
+            log.client_program_day_exercise_id
+          );
+          const linkedExerciseId = programExerciseIdMap.get(
+            log.client_program_day_exercise_id
+          );
+          const equipment =
+            (linkedExerciseId
+              ? equipmentByExerciseId.get(linkedExerciseId)
+              : null) ??
+            (exerciseName
+              ? equipmentByExerciseName.get(exerciseName.toLowerCase().trim())
+              : null) ??
+            null;
+          const effectiveWeightKg =
+            log.actual_weight_kg *
+            getLoggedWeightMultiplier(equipment, log.weight_logging_mode);
+
+          return {
+            ...log,
+            exercise_name: exerciseName,
+            effective_weight_kg: effectiveWeightKg,
+          };
+        });
+        const namedLogs = enrichedLogs
           .map((log) => ({
             ...log,
-            exercise_name: exerciseMap.get(log.client_program_day_exercise_id),
           }))
           .filter(
-            (log): log is CompletedSetLog & { exercise_name: string } =>
+            (
+              log
+            ): log is CompletedSetLog & {
+              exercise_name: string;
+              effective_weight_kg: number;
+            } =>
               Boolean(log.exercise_name)
           );
 
@@ -303,10 +444,10 @@ const today = todayStr()
         namedLogs.forEach((log) => {
           const existing = prMap.get(log.exercise_name);
           
-          if (!existing || log.actual_weight_kg > existing.max_weight_kg) {
+          if (!existing || log.effective_weight_kg > existing.max_weight_kg) {
             prMap.set(log.exercise_name, {
               exercise_name: log.exercise_name,
-              max_weight_kg: log.actual_weight_kg,
+              max_weight_kg: log.effective_weight_kg,
               log_date: log.created_at.split("T")[0],
               reps: log.actual_reps || 0,
             });
@@ -328,7 +469,7 @@ const today = todayStr()
             .filter((log) => log.exercise_name === strongestLift.exercise_name)
             .forEach((log) => {
               const date = log.created_at.split("T")[0];
-              bestSoFar = Math.max(bestSoFar, log.actual_weight_kg);
+              bestSoFar = Math.max(bestSoFar, log.effective_weight_kg);
               strongestLiftTrend.set(date, bestSoFar);
             });
 
@@ -378,13 +519,13 @@ const today = todayStr()
           const current = improvements.get(log.exercise_name);
           if (!current) {
             improvements.set(log.exercise_name, {
-              first: log.actual_weight_kg,
-              best: log.actual_weight_kg,
+              first: log.effective_weight_kg,
+              best: log.effective_weight_kg,
             });
             return;
           }
 
-          current.best = Math.max(current.best, log.actual_weight_kg);
+          current.best = Math.max(current.best, log.effective_weight_kg);
         });
         const mostImproved = [...improvements.entries()]
           .map(([exercise, values]) => ({
@@ -400,7 +541,7 @@ const today = todayStr()
             .forEach((log) => {
               const date = log.created_at.split("T")[0];
               const previous = improvementTrend.get(date) ?? 0;
-              improvementTrend.set(date, Math.max(previous, log.actual_weight_kg));
+              improvementTrend.set(date, Math.max(previous, log.effective_weight_kg));
             });
 
           insights.push({
@@ -414,11 +555,14 @@ const today = todayStr()
 
         const bestByExercise = new Map<string, number>();
         const recentPb = namedLogs.reduce<
-          (CompletedSetLog & { exercise_name: string }) | null
+          (CompletedSetLog & {
+            exercise_name: string;
+            effective_weight_kg: number;
+          }) | null
         >((latest, log) => {
           const previousBest = bestByExercise.get(log.exercise_name) ?? 0;
-          if (log.actual_weight_kg > previousBest) {
-            bestByExercise.set(log.exercise_name, log.actual_weight_kg);
+          if (log.effective_weight_kg > previousBest) {
+            bestByExercise.set(log.exercise_name, log.effective_weight_kg);
             return log;
           }
 
@@ -427,7 +571,7 @@ const today = todayStr()
         if (recentPb) {
           insights.push({
             title: "Most recent PB",
-            value: `${recentPb.actual_weight_kg}kg`,
+            value: `${recentPb.effective_weight_kg}kg`,
             detail: `${recentPb.exercise_name} on ${recentPb.created_at.split("T")[0]}`,
           });
         }
@@ -436,18 +580,18 @@ const today = todayStr()
       }
 
       // Calculate total volume lifted (all completed sets)
-      if (typedSetLogs.length > 0) {
-        const totalWeightLifted = typedSetLogs.reduce((sum, set) => {
-          return sum + (set.actual_weight_kg * set.actual_reps);
+      if (enrichedLogs.length > 0) {
+        const totalWeightLifted = enrichedLogs.reduce((sum, set) => {
+          return sum + (set.effective_weight_kg * set.actual_reps);
         }, 0);
         const volumeByDate = new Map<string, number>();
         const setsByDate = new Map<string, number>();
 
-        typedSetLogs.forEach((set) => {
+        enrichedLogs.forEach((set) => {
           const date = set.created_at.split("T")[0];
           volumeByDate.set(
             date,
-            (volumeByDate.get(date) ?? 0) + set.actual_weight_kg * set.actual_reps
+            (volumeByDate.get(date) ?? 0) + set.effective_weight_kg * set.actual_reps
           );
           setsByDate.set(date, (setsByDate.get(date) ?? 0) + 1);
         });
@@ -455,7 +599,7 @@ const today = todayStr()
         insights.unshift({
           title: "Total volume lifted",
           value: `${Math.round(totalWeightLifted).toLocaleString()}kg`,
-          detail: `${typedSetLogs.length.toLocaleString()} sets and ${typedSetLogs
+          detail: `${enrichedLogs.length.toLocaleString()} sets and ${enrichedLogs
             .reduce((sum, set) => sum + set.actual_reps, 0)
             .toLocaleString()} reps logged`,
           chartData: buildSparklineData(volumeByDate),
@@ -464,8 +608,8 @@ const today = todayStr()
 
         insights.push({
           title: "Total completed work",
-          value: `${typedSetLogs.length.toLocaleString()} sets`,
-          detail: `${typedSetLogs
+          value: `${enrichedLogs.length.toLocaleString()} sets`,
+          detail: `${enrichedLogs
             .reduce((sum, set) => sum + set.actual_reps, 0)
             .toLocaleString()} total reps recorded`,
           chartData: buildSparklineData(setsByDate),
@@ -500,7 +644,7 @@ const today = todayStr()
 
     const { data: clientData, error: clientError } = await supabase
       .from("clients")
-      .select("id, full_name, profile_id")
+      .select("id, full_name, profile_id, daily_step_target")
       .eq("profile_id", user.id)
       .single();
 
@@ -578,6 +722,120 @@ if (isEnabled) {
   useEffect(() => {
     loadStats();
   }, []);
+
+  const loadDailyTrackingForDate = async (clientId: string, date: string) => {
+    setLoadingDailyTracking(true);
+    setDailyTrackingMessage(null);
+
+    const { data, error } = await supabase
+      .from("daily_tracking")
+      .select("*")
+      .eq("client_id", clientId)
+      .eq("log_date", date)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error loading daily tracking:", error);
+      setDailyTrackingRecord(null);
+      setDailyStepsInput("");
+      setDailyWaterCompleted(false);
+      setLoadingDailyTracking(false);
+      return;
+    }
+
+    const tracking = data as DailyTracking | null;
+    setDailyTrackingRecord(tracking);
+    setDailyStepsInput(tracking?.steps_logged?.toString() ?? "");
+    setDailyWaterCompleted(Boolean(tracking?.water_completed));
+    setLoadingDailyTracking(false);
+  };
+
+  useEffect(() => {
+    if (!client) return;
+    loadDailyTrackingForDate(client.id, dailyTrackingDate);
+  }, [client, dailyTrackingDate]);
+
+  const handleSaveDailyTracking = async () => {
+    if (!client) return;
+
+    if (!dailyTrackingDate) {
+      alert("Please choose a date.");
+      return;
+    }
+
+    if (dailyTrackingDate > today) {
+      alert("You can only update today or a previous day.");
+      return;
+    }
+
+    const trimmedSteps = dailyStepsInput.trim();
+    const stepsLogged =
+      trimmedSteps === "" ? null : Math.floor(Number(trimmedSteps));
+
+    if (
+      stepsLogged !== null &&
+      (!Number.isFinite(stepsLogged) || stepsLogged < 0)
+    ) {
+      alert("Please enter a valid step count.");
+      return;
+    }
+
+    setSavingDailyTracking(true);
+    setDailyTrackingMessage(null);
+
+    const previousSteps = dailyTrackingRecord?.steps_logged ?? 0;
+    const previousWaterCompleted = Boolean(dailyTrackingRecord?.water_completed);
+    const stepTarget = client.daily_step_target ?? 5000;
+    const crossedStepTarget =
+      stepsLogged !== null &&
+      previousSteps < stepTarget &&
+      stepsLogged >= stepTarget;
+    const completedWater = dailyWaterCompleted && !previousWaterCompleted;
+
+    const payload = {
+      client_id: client.id,
+      log_date: dailyTrackingDate,
+      steps_logged: stepsLogged,
+      water_completed: dailyWaterCompleted,
+    };
+
+    const query = dailyTrackingRecord
+      ? supabase
+          .from("daily_tracking")
+          .update(payload)
+          .eq("id", dailyTrackingRecord.id)
+      : supabase.from("daily_tracking").insert([payload]);
+
+    const { data, error } = await query.select("*").single();
+
+    if (error) {
+      alert(`Daily tracking could not be saved: ${error.message}`);
+      setSavingDailyTracking(false);
+      return;
+    }
+
+    setDailyTrackingRecord(data as DailyTracking);
+    if (crossedStepTarget) {
+      await awardBondXp(
+        client.id,
+        COMPANION_XP_REWARDS.stepsTargetHit,
+        "steps_target_hit",
+        `Step target hit for ${dailyTrackingDate}`
+      );
+    }
+
+    if (completedWater) {
+      await awardBondXp(
+        client.id,
+        COMPANION_XP_REWARDS.waterTargetHit,
+        "water_complete",
+        `Water target hit for ${dailyTrackingDate}`
+      );
+    }
+
+    setDailyTrackingMessage("Daily tracking saved.");
+    setSavingDailyTracking(false);
+  };
 
   const handleSaveWeight = async () => {
     if (!client || weightInput.trim() === "") return;
@@ -769,7 +1027,7 @@ const handleUploadPhotos = async () => {
       </div>
 
       {loading ? (
-        <p className={styles.body}>Loading stats...</p>
+        <StatsSkeleton />
       ) : !client ? (
         <p className={styles.body}>Client not found.</p>
       ) : (
@@ -1035,6 +1293,97 @@ const handleUploadPhotos = async () => {
                 ))
               )}
             </div>
+          </div>
+
+          <div className={styles.card}>
+            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-start">
+              <div>
+                <h2 className={styles.h2}>Daily Tracking</h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Backfill steps and water for yesterday or another missed day.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDailyTrackingDate(addDays(today, -1))}
+                  className="rounded-md border border-border-subtle px-3 py-2 text-sm font-medium text-ink transition hover:bg-surface-sunken"
+                >
+                  Yesterday
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyTrackingDate(today)}
+                  className="rounded-md border border-border-subtle px-3 py-2 text-sm font-medium text-ink transition hover:bg-surface-sunken"
+                >
+                  Today
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+              <label className="block text-sm font-medium text-ink">
+                Date
+                <input
+                  type="date"
+                  value={dailyTrackingDate}
+                  max={today}
+                  onChange={(event) => setDailyTrackingDate(event.target.value)}
+                  className={`${styles.input} mt-1 w-full`}
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-ink">
+                Steps
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={dailyStepsInput}
+                  onChange={(event) => setDailyStepsInput(event.target.value)}
+                  className={`${styles.input} mt-1 w-full`}
+                  placeholder="Steps for this day"
+                />
+              </label>
+
+              <label className="flex min-h-12 items-center gap-3 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-sm font-medium text-ink">
+                <input
+                  type="checkbox"
+                  checked={dailyWaterCompleted}
+                  onChange={(event) =>
+                    setDailyWaterCompleted(event.target.checked)
+                  }
+                  className="h-5 w-5 rounded border-border-subtle text-gold focus:ring-gold"
+                />
+                Water done
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-ink-muted">
+                {loadingDailyTracking
+                  ? "Loading this day..."
+                  : dailyTrackingRecord
+                    ? "Existing entry found. Saving will update it."
+                    : "No entry yet. Saving will create one."}
+              </p>
+              <button
+                type="button"
+                onClick={handleSaveDailyTracking}
+                disabled={savingDailyTracking || loadingDailyTracking}
+                className={`${styles.buttonPrimaryStats} disabled:opacity-50`}
+              >
+                {savingDailyTracking ? "Saving..." : "Save Day"}
+              </button>
+            </div>
+
+            {dailyTrackingMessage && (
+              <p className="mt-3 text-sm font-medium text-emerald">
+                {dailyTrackingMessage}
+              </p>
+            )}
           </div>
 
           <div className={styles.card}>

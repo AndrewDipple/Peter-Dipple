@@ -167,6 +167,16 @@ type MacroTotals = {
   calories: number;
 };
 
+type WeightTrendReview = {
+  status: "good" | "watch" | "review" | "insufficient";
+  title: string;
+  detail: string;
+  weeklyChangeKg: number | null;
+  weeklyChangePct: number | null;
+  daysCovered: number;
+  logsUsed: number;
+};
+
 type PageProps = {
   params: Promise<{
     id: string;
@@ -396,6 +406,105 @@ const proposedTdee = useMemo(() => {
   if (!client?.bmr_estimate || !trainerActivity) return null;
   return Math.round(client.bmr_estimate * getActivityFactor(trainerActivity));
 }, [client?.bmr_estimate, trainerActivity]);
+
+const weightTrendReview = useMemo<WeightTrendReview>(() => {
+  const sortedLogs = [...weightLogs]
+    .sort((a, b) => a.log_date.localeCompare(b.log_date))
+    .slice(-8);
+
+  if (sortedLogs.length < 4) {
+    return {
+      status: "insufficient",
+      title: "More data needed",
+      detail: "At least four recent weight logs are needed before trend review is useful.",
+      weeklyChangeKg: null,
+      weeklyChangePct: null,
+      daysCovered: 0,
+      logsUsed: sortedLogs.length,
+    };
+  }
+
+  const first = sortedLogs[0];
+  const latest = sortedLogs[sortedLogs.length - 1];
+  const daysCovered = Math.max(
+    1,
+    Math.round(
+      (new Date(`${latest.log_date}T12:00:00`).getTime() -
+        new Date(`${first.log_date}T12:00:00`).getTime()) /
+        (1000 * 60 * 60 * 24)
+    )
+  );
+
+  if (daysCovered < 14) {
+    return {
+      status: "insufficient",
+      title: "Trend still settling",
+      detail: "Weight logs need to cover at least 14 days before this review is useful.",
+      weeklyChangeKg: null,
+      weeklyChangePct: null,
+      daysCovered,
+      logsUsed: sortedLogs.length,
+    };
+  }
+
+  const totalChangeKg = Number(latest.weight_kg) - Number(first.weight_kg);
+  const weeklyChangeKg = (totalChangeKg / daysCovered) * 7;
+  const baselineWeight = Number(first.weight_kg) || Number(latest.weight_kg);
+  const weeklyChangePct = baselineWeight
+    ? (weeklyChangeKg / baselineWeight) * 100
+    : 0;
+  const lossPct = -weeklyChangePct;
+
+  if (weeklyChangePct > 0.1) {
+    return {
+      status: "review",
+      title: "Weight trending upward",
+      detail:
+        "This is worth a calorie target or logging accuracy review if weight loss is still the goal.",
+      weeklyChangeKg,
+      weeklyChangePct,
+      daysCovered,
+      logsUsed: sortedLogs.length,
+    };
+  }
+
+  if (lossPct > 1) {
+    return {
+      status: "review",
+      title: "Weight dropping quickly",
+      detail:
+        "Review hunger, recovery, adherence, and whether the calorie target is too aggressive.",
+      weeklyChangeKg,
+      weeklyChangePct,
+      daysCovered,
+      logsUsed: sortedLogs.length,
+    };
+  }
+
+  if (lossPct < 0.25) {
+    return {
+      status: "watch",
+      title: "Weight trend is fairly flat",
+      detail:
+        "If adherence is strong, consider reviewing the calorie target or weekend intake pattern.",
+      weeklyChangeKg,
+      weeklyChangePct,
+      daysCovered,
+      logsUsed: sortedLogs.length,
+    };
+  }
+
+  return {
+    status: "good",
+    title: "Trend looks sensible",
+    detail:
+      "Current weight trend is within a conservative weight-loss range. Peter should still sense-check context.",
+    weeklyChangeKg,
+    weeklyChangePct,
+    daysCovered,
+    logsUsed: sortedLogs.length,
+  };
+}, [weightLogs]);
 
   useEffect(() => {
     const loadBaseData = async () => {
@@ -937,7 +1046,7 @@ const handleDeleteClient = async () => {
   router.push("/trainer/clients");
 };
 
-const handleExportClient = async () => {
+const handleExportClient = async (format: "json" | "csv" = "json") => {
   if (!client || exportingClient) return;
 
   setExportingClient(true);
@@ -959,7 +1068,11 @@ const handleExportClient = async () => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ clientId: client.id }),
+    body: JSON.stringify({
+      clientId: client.id,
+      note: sarExportNote,
+      format,
+    }),
   });
 
   if (!response.ok) {
@@ -974,7 +1087,8 @@ const handleExportClient = async () => {
   const link = document.createElement("a");
   const disposition = response.headers.get("Content-Disposition");
   const fileName =
-    disposition?.match(/filename="([^"]+)"/)?.[1] ?? `sar-${client.id}.json`;
+    disposition?.match(/filename="([^"]+)"/)?.[1] ??
+    `sar-${client.id}.${format}`;
 
   link.href = url;
   link.download = fileName;
@@ -1089,6 +1203,13 @@ const formatAuditEvent = (eventType: string) => {
   return labels[eventType] ?? eventType.replaceAll("_", " ");
 };
 
+const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
+  if (status === "good") return "border-emerald bg-emerald/5 text-emerald";
+  if (status === "watch") return "border-gold bg-gold/10 text-gold";
+  if (status === "review") return "border-red-200 bg-red-50 text-red-700";
+  return "border-border-subtle bg-surface-sunken text-ink-muted";
+};
+
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
   return (
@@ -1111,10 +1232,20 @@ const formatAuditEvent = (eventType: string) => {
             <h2 className="mb-4 text-2xl font-bold text-ink">Summary</h2>
 
             <div className={styles.card}>
-              <h3 className="text-xl font-semibold text-ink">
-                {client.full_name}
-              </h3>
-              <p className="mt-1 text-ink-muted">{client.email}</p>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold text-ink">
+                    {client.full_name}
+                  </h3>
+                  <p className="mt-1 text-ink-muted">{client.email}</p>
+                </div>
+                <Link
+                  href={`/trainer/clients/${client.id}/monthly-report`}
+                  className={styles.buttonSecondary}
+                >
+                  Monthly report
+                </Link>
+              </div>
             </div>
 
             {currentRole === "admin" && (
@@ -1126,14 +1257,24 @@ const formatAuditEvent = (eventType: string) => {
                   Permanently deletes this client&apos;s app data, progress photos, profile,
                   and login account. This cannot be undone.
                 </p>
-                <button
-                  type="button"
-                  onClick={handleExportClient}
-                  disabled={exportingClient}
-                  className={`${styles.buttonSecondary} mt-4`}
-                >
-                  {exportingClient ? "Exporting..." : "Download SAR export"}
-                </button>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExportClient("json")}
+                    disabled={exportingClient}
+                    className={styles.buttonSecondary}
+                  >
+                    {exportingClient ? "Exporting..." : "Download JSON export"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportClient("csv")}
+                    disabled={exportingClient}
+                    className={styles.buttonSecondary}
+                  >
+                    Download CSV export
+                  </button>
+                </div>
                 <label className="mt-4 block text-sm font-medium text-red-800">
                   SAR export note
                 </label>
@@ -1480,6 +1621,73 @@ const formatAuditEvent = (eventType: string) => {
     )}
   </div>
 </div>
+
+            <div className={`${styles.card} mt-4`}>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="font-semibold text-ink">Weight Trend Review</h3>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Coaching prompt only. Peter makes the final decision before
+                    changing targets.
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${getTrendReviewClasses(
+                    weightTrendReview.status
+                  )}`}
+                >
+                  {weightTrendReview.status === "insufficient"
+                    ? "Needs data"
+                    : weightTrendReview.status === "review"
+                      ? "Review"
+                      : weightTrendReview.status === "watch"
+                        ? "Watch"
+                        : "Steady"}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_2fr]">
+                <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Weekly trend
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-ink">
+                    {weightTrendReview.weeklyChangeKg !== null
+                      ? `${weightTrendReview.weeklyChangeKg > 0 ? "+" : ""}${weightTrendReview.weeklyChangeKg.toFixed(2)} kg/week`
+                      : "-"}
+                  </p>
+                  {weightTrendReview.weeklyChangePct !== null && (
+                    <p className="mt-1 text-xs text-ink-muted">
+                      {weightTrendReview.weeklyChangePct > 0 ? "+" : ""}
+                      {weightTrendReview.weeklyChangePct.toFixed(2)}% bodyweight/week
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    Data used
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-ink">
+                    {weightTrendReview.logsUsed} logs
+                  </p>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {weightTrendReview.daysCovered > 0
+                      ? `${weightTrendReview.daysCovered} days covered`
+                      : "Waiting for spread of logs"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border-subtle bg-surface-sunken p-3">
+                  <p className="text-sm font-semibold text-ink">
+                    {weightTrendReview.title}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {weightTrendReview.detail}
+                  </p>
+                </div>
+              </div>
+            </div>
             </div>
 
             <div className={`${styles.card} mt-4`}>

@@ -56,6 +56,48 @@ type PlannedMeal = {
   } | null;
 };
 
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-surface-sunken ${className}`}
+    />
+  );
+}
+
+function NutritionSkeleton() {
+  return (
+    <div className="mt-6 space-y-6" aria-label="Loading nutrition">
+      <div className={`${styles.card} bg-surface-sunken`}>
+        <SkeletonBlock className="h-6 w-36 bg-surface" />
+        <SkeletonBlock className="mt-4 h-8 w-48 bg-surface" />
+        <SkeletonBlock className="mt-2 h-4 w-40 bg-surface" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <SkeletonBlock className="h-32" />
+        <SkeletonBlock className="h-32" />
+      </div>
+
+      <div className={styles.card}>
+        <SkeletonBlock className="h-6 w-44" />
+        <div className="mt-4 space-y-2">
+          <SkeletonBlock className="h-14" />
+          <SkeletonBlock className="h-14" />
+          <SkeletonBlock className="h-14" />
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <SkeletonBlock className="h-6 w-52" />
+        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
+          <SkeletonBlock className="h-11" />
+          <SkeletonBlock className="h-11 w-full md:w-40" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ClientNutritionPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -513,6 +555,9 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
         </div>
       </div>
 
+      {loading ? (
+        <NutritionSkeleton />
+      ) : (
       <div className="mt-6 space-y-6">
         {clientId && <ClientUnreadRepliesBanner clientId={clientId} />}
 
@@ -738,6 +783,7 @@ const handleRemoveEatenMeal = async (meal: EatenMeal) => {
         )}
 
       </div>
+      )}
     </>
   );
 }

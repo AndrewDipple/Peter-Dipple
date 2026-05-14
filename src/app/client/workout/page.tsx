@@ -4,10 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { getMondayOf, parseLocalDate, todayStr } from "@/lib/dates";
+import {
+  getDefaultWeightLoggingMode,
+  isDumbbellEquipment,
+  type WeightLoggingMode,
+} from "@/lib/equipment";
 import { updateStreak } from "@/lib/streaks";
 import {
   isCompanionEnabledForClient,
   getActiveCompanionView,
+  getCompanionDisplayName,
   getRandomLine,
   personalizeCompanionLine,
   type ActiveCompanionView,
@@ -93,6 +99,7 @@ type ClientProgramSetLog = {
   actual_reps: number | null;
   completed: boolean;
   log_date: string | null;
+  weight_logging_mode?: WeightLoggingMode | null;
 };
 
 type DraftValues = {
@@ -100,12 +107,18 @@ type DraftValues = {
   reps: string;
 };
 
-type PreviousWeightMap = Record<string, number | null>;
+type PreviousWeightSummary = {
+  weight: number;
+  mode: WeightLoggingMode;
+};
+
+type PreviousWeightMap = Record<string, PreviousWeightSummary | null>;
 
 type ExerciseProgressionSuggestion = {
   lastWeight: number;
   suggestedWeight: number;
   sessionsAtWeight: number;
+  mode: WeightLoggingMode;
 };
 
 type ProgressionSuggestionMap = Record<string, ExerciseProgressionSuggestion | null>;
@@ -117,11 +130,71 @@ type RestTimer = {
   totalSeconds: number;
 };
 
+type WindowWithAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+type WindowWithNotification = Window & {
+  Notification?: typeof Notification;
+};
+
 type CelebrationAchievement = {
   icon: string;
   title: string;
   description: string;
 };
+
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-md bg-surface-sunken ${className}`}
+    />
+  );
+}
+
+function WorkoutSkeleton() {
+  return (
+    <div className="mt-6 space-y-6" aria-label="Loading workout">
+      <div className={styles.card}>
+        <div className="flex gap-2 overflow-hidden">
+          <SkeletonBlock className="h-24 min-w-32 flex-1" />
+          <SkeletonBlock className="h-24 min-w-32 flex-1" />
+          <SkeletonBlock className="h-24 min-w-32 flex-1" />
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <div className="flex items-center justify-between gap-4">
+          <SkeletonBlock className="h-4 w-36" />
+          <SkeletonBlock className="h-4 w-28" />
+        </div>
+        <SkeletonBlock className="mt-3 h-3 w-full rounded-full" />
+      </div>
+
+      <div className="flex gap-2 overflow-hidden rounded-2xl bg-surface-sunken p-2">
+        <SkeletonBlock className="h-10 min-w-32 bg-surface" />
+        <SkeletonBlock className="h-10 min-w-32 bg-surface" />
+        <SkeletonBlock className="h-10 min-w-32 bg-surface" />
+      </div>
+
+      <div className={styles.card}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-3">
+            <SkeletonBlock className="h-6 w-56" />
+            <SkeletonBlock className="h-4 w-40" />
+          </div>
+          <SkeletonBlock className="h-10 w-32" />
+        </div>
+        <SkeletonBlock className="mt-5 aspect-video w-full" />
+        <div className="mt-5 space-y-3">
+          <SkeletonBlock className="h-14" />
+          <SkeletonBlock className="h-14" />
+          <SkeletonBlock className="h-14" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const getNextWorkoutDay = (
   days: ClientProgramDay[],
@@ -161,6 +234,9 @@ export default function ClientWorkoutPage() {
   const [activeExerciseId, setActiveExerciseId] = useState("");
   const [setLogs, setSetLogs] = useState<ClientProgramSetLog[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValues>>({});
+  const [weightLoggingModes, setWeightLoggingModes] = useState<
+    Record<string, WeightLoggingMode>
+  >({});
   const [previousWeights, setPreviousWeights] = useState<PreviousWeightMap>({});
   const [progressionSuggestions, setProgressionSuggestions] = useState<ProgressionSuggestionMap>({});
   const [loading, setLoading] = useState(true);
@@ -187,7 +263,12 @@ export default function ClientWorkoutPage() {
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
   const [restCount, setRestCount] = useState(0);
   const [companionLine, setCompanionLine] = useState<string | null>(null);
+  const [progressionNudgeLine, setProgressionNudgeLine] = useState<string | null>(
+    null
+  );
   const lastLineRef = useRef<string | null>(null);
+  const restAudioContextRef = useRef<AudioContext | null>(null);
+  const restTimerFinishedRef = useRef(false);
 
   const today = useMemo(() => todayStr(), []);
   const weekStart = useMemo(() => getMondayOf(today), [today]);
@@ -200,6 +281,95 @@ export default function ClientWorkoutPage() {
 
   const canTryNetworkWrite = () =>
     typeof navigator === "undefined" || navigator.onLine;
+
+  const getRestAudioContext = () => {
+    if (typeof window === "undefined") return null;
+
+    if (!restAudioContextRef.current) {
+      const AudioContextConstructor =
+        window.AudioContext ??
+        (window as WindowWithAudioContext).webkitAudioContext;
+
+      if (!AudioContextConstructor) return null;
+
+      restAudioContextRef.current = new AudioContextConstructor();
+    }
+
+    return restAudioContextRef.current;
+  };
+
+  const primeRestTimerSound = async () => {
+    const audioContext = getRestAudioContext();
+
+    if (audioContext?.state === "suspended") {
+      await audioContext.resume();
+    }
+  };
+
+  const playRestTimerSound = async () => {
+    const audioContext = getRestAudioContext();
+    if (!audioContext) return;
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    const now = audioContext.currentTime;
+    const beep = (start: number, frequency: number) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 0.3);
+    };
+
+    beep(now, 880);
+    beep(now + 0.34, 1046.5);
+  };
+
+  const requestRestTimerNotificationPermission = async () => {
+    if (typeof window === "undefined") return;
+
+    const BrowserNotification = (window as WindowWithNotification).Notification;
+    if (!BrowserNotification || BrowserNotification.permission !== "default") {
+      return;
+    }
+
+    await BrowserNotification.requestPermission();
+  };
+
+  const showRestTimerNotification = () => {
+    if (typeof window === "undefined") return;
+
+    const BrowserNotification = (window as WindowWithNotification).Notification;
+    if (!BrowserNotification || BrowserNotification.permission !== "granted") {
+      return;
+    }
+
+    new BrowserNotification("Rest timer finished", {
+      body: "Time for the next set.",
+      tag: "rest-timer-finished",
+      silent: true,
+    });
+  };
+
+  const announceRestTimerFinished = async () => {
+    showRestTimerNotification();
+
+    try {
+      await playRestTimerSound();
+    } catch {
+      // Some browsers can block audio until the user interacts again.
+    }
+  };
 
   const syncQueuedWorkoutChanges = async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
@@ -217,16 +387,18 @@ export default function ClientWorkoutPage() {
   };
 
   useEffect(() => {
-    if (!restTimer) return;
-
-    if (restTimer.secondsRemaining <= 0) {
-      setRestTimer(null);
-      return;
-    }
+    if (!restTimer || restTimer.secondsRemaining <= 0) return;
 
     const interval = setInterval(() => {
       setRestTimer((prev) => {
-        if (!prev || prev.secondsRemaining <= 1) return null;
+        if (!prev) return null;
+
+        if (prev.secondsRemaining <= 1) {
+          return {
+            ...prev,
+            secondsRemaining: 0,
+          };
+        }
 
         return {
           ...prev,
@@ -236,6 +408,19 @@ export default function ClientWorkoutPage() {
     }, 1000);
 
     return () => clearInterval(interval);
+  }, [restTimer]);
+
+  useEffect(() => {
+    if (!restTimer) {
+      restTimerFinishedRef.current = false;
+      return;
+    }
+
+    if (restTimer.secondsRemaining > 0 || restTimerFinishedRef.current) return;
+
+    restTimerFinishedRef.current = true;
+    announceRestTimerFinished();
+    setRestTimer(null);
   }, [restTimer]);
 
   const loadWorkout = async () => {
@@ -374,6 +559,7 @@ export default function ClientWorkoutPage() {
 
       setCurrentDay(selectedDay);
       setDrafts({});
+      setWeightLoggingModes({});
       setPreviousWeights({});
       setShowVideo(false);
 
@@ -489,11 +675,39 @@ export default function ClientWorkoutPage() {
 
         if (!setLogError && setLogData) {
           setSetLogs(setLogData);
+          const nextModes: Record<string, WeightLoggingMode> = {};
+
+          enrichedExercises.forEach((exercise) => {
+            const savedMode = (setLogData as ClientProgramSetLog[]).find(
+              (log) =>
+                log.client_program_day_exercise_id === exercise.id &&
+                log.weight_logging_mode
+            )?.weight_logging_mode;
+
+            nextModes[exercise.id] =
+              savedMode ??
+              getDefaultWeightLoggingMode(
+                exercise.exercise_details?.primary_equipment
+              );
+          });
+
+          setWeightLoggingModes(nextModes);
         } else {
           setSetLogs([]);
+          setWeightLoggingModes(
+            Object.fromEntries(
+              enrichedExercises.map((exercise) => [
+                exercise.id,
+                getDefaultWeightLoggingMode(
+                  exercise.exercise_details?.primary_equipment
+                ),
+              ])
+            )
+          );
         }
       } else {
         setSetLogs([]);
+        setWeightLoggingModes({});
       }
 
       // Load previous weights
@@ -506,7 +720,7 @@ export default function ClientWorkoutPage() {
       ) as string[];
 
       if (exerciseNamesForPrevious.length > 0) {
-        const previousWeightLookup: Record<string, number | null> = {};
+        const previousWeightLookup: PreviousWeightMap = {};
         const progressionSuggestionLookup: ProgressionSuggestionMap = {};
 
         for (const exerciseName of exerciseNamesForPrevious) {
@@ -526,7 +740,7 @@ export default function ClientWorkoutPage() {
 
           const { data: previousLogs } = await supabase
             .from("client_program_set_logs")
-            .select("actual_weight_kg, actual_reps, completed, log_date, set_number, created_at")
+            .select("actual_weight_kg, actual_reps, completed, log_date, set_number, created_at, weight_logging_mode")
             .eq("client_id", client.id)
             .in("client_program_day_exercise_id", matchingExerciseIds)
             .lt("log_date", today)
@@ -534,14 +748,22 @@ export default function ClientWorkoutPage() {
             .order("log_date", { ascending: false })
             .order("set_number", { ascending: true });
 
-          previousWeightLookup[exerciseName] =
-            previousLogs && previousLogs.length > 0
-              ? previousLogs[0].actual_weight_kg
-              : null;
-
           const exerciseForSuggestion = enrichedExercises.find(
             (exercise) => exercise.exercise_name?.trim() === exerciseName
           );
+          const previousLog = previousLogs?.[0] ?? null;
+
+          previousWeightLookup[exerciseName] =
+            previousLog && previousLog.actual_weight_kg !== null
+              ? {
+                  weight: previousLog.actual_weight_kg,
+                  mode:
+                    (previousLog.weight_logging_mode as WeightLoggingMode | null) ??
+                    (exerciseForSuggestion
+                      ? getExerciseWeightLoggingMode(exerciseForSuggestion)
+                      : "total"),
+                }
+              : null;
 
           progressionSuggestionLookup[exerciseName] =
             exerciseForSuggestion && previousLogs
@@ -568,6 +790,12 @@ export default function ClientWorkoutPage() {
         log.set_number === setNumber
     ) || null;
 
+  const getExerciseWeightLoggingMode = (
+    exercise: ClientProgramDayExercise
+  ): WeightLoggingMode =>
+    weightLoggingModes[exercise.id] ??
+    getDefaultWeightLoggingMode(exercise.exercise_details?.primary_equipment);
+
   const getDraftKey = (exerciseId: string, setNumber: number) =>
     `${exerciseId}-${setNumber}`;
 
@@ -590,6 +818,7 @@ export default function ClientWorkoutPage() {
       completed: boolean;
       log_date: string | null;
       set_number: number;
+      weight_logging_mode?: WeightLoggingMode | null;
     }>
   ): ExerciseProgressionSuggestion | null => {
     const targetSets = exercise.sets ?? 0;
@@ -620,6 +849,13 @@ export default function ClientWorkoutPage() {
         const sameWeight = weights.every((weight) => weight === sessionWeight);
         if (!sameWeight) return null;
 
+        const modes = firstSets.map(
+          (log) => log.weight_logging_mode ?? getExerciseWeightLoggingMode(exercise)
+        );
+        const sessionMode = modes[0];
+        const sameMode = modes.every((mode) => mode === sessionMode);
+        if (!sameMode) return null;
+
         const repsHit =
           targetReps === null ||
           firstSets.every(
@@ -628,14 +864,19 @@ export default function ClientWorkoutPage() {
 
         if (!repsHit) return null;
 
-        return { date, weight: sessionWeight };
+        return { date, weight: sessionWeight, mode: sessionMode };
       })
-      .filter(Boolean) as Array<{ date: string; weight: number }>;
+      .filter(Boolean) as Array<{
+        date: string;
+        weight: number;
+        mode: WeightLoggingMode;
+      }>;
 
     if (completedSessions.length < 2) return null;
 
     const [latest, previous] = completedSessions;
     if (latest.weight !== previous.weight) return null;
+    if (latest.mode !== previous.mode) return null;
 
     const increaseFactor = latest.weight < 20 ? 1.1 : 1.05;
     const suggestedWeight = roundToNearestHalf(latest.weight * increaseFactor);
@@ -646,6 +887,7 @@ export default function ClientWorkoutPage() {
       lastWeight: latest.weight,
       suggestedWeight,
       sessionsAtWeight: 2,
+      mode: latest.mode,
     };
   };
 
@@ -660,7 +902,7 @@ export default function ClientWorkoutPage() {
     const previousWeight = previousWeights[exercise.exercise_name];
 
     if (previousWeight !== null && previousWeight !== undefined) {
-      return String(previousWeight);
+      return String(previousWeight.weight);
     }
 
     return "";
@@ -770,6 +1012,68 @@ export default function ClientWorkoutPage() {
   const activeProgressionSuggestion = activeExercise?.exercise_name
     ? progressionSuggestions[activeExercise.exercise_name] ?? null
     : null;
+  const activeExerciseUsesDumbbells = isDumbbellEquipment(
+    activeExercise?.exercise_details?.primary_equipment
+  );
+  const activeWeightLoggingMode = activeExercise
+    ? getExerciseWeightLoggingMode(activeExercise)
+    : "total";
+  const activeCompanionDisplayName = getCompanionDisplayName(companionView);
+
+  const formatProgressionNudgeLine = (
+    line: string,
+    suggestion: ExerciseProgressionSuggestion
+  ) => {
+    const modeLabel =
+      suggestion.mode === "per_dumbbell" ? "per dumbbell" : "total";
+    const companionName = activeCompanionDisplayName ?? "Your companion";
+
+    return line
+      .replaceAll("{name}", companionName)
+      .replaceAll("{weight}", String(suggestion.lastWeight))
+      .replaceAll("{suggestedWeight}", String(suggestion.suggestedWeight))
+      .replaceAll("{sessions}", String(suggestion.sessionsAtWeight))
+      .replaceAll("{mode}", modeLabel);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProgressionNudgeLine = async () => {
+      setProgressionNudgeLine(null);
+
+      if (!companionEnabled || !companionView || !activeProgressionSuggestion) {
+        return;
+      }
+
+      const line = await getRandomLine(
+        companionView.path.slug,
+        "progression_nudge",
+        companionView.currentForm.form_number,
+        { fallbackToGeneral: false }
+      );
+
+      if (!cancelled && line) {
+        setProgressionNudgeLine(
+          formatProgressionNudgeLine(line, activeProgressionSuggestion)
+        );
+      }
+    };
+
+    loadProgressionNudgeLine();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeCompanionDisplayName,
+    activeProgressionSuggestion?.lastWeight,
+    activeProgressionSuggestion?.mode,
+    activeProgressionSuggestion?.sessionsAtWeight,
+    activeProgressionSuggestion?.suggestedWeight,
+    companionEnabled,
+    companionView,
+  ]);
 
   const currentDayCompletion = currentDay
     ? workoutCompletions.find(
@@ -794,11 +1098,12 @@ export default function ClientWorkoutPage() {
     clientProgramDayId: string;
     exerciseId: string;
     setNumber: number;
-    updates: {
-      actual_weight_kg?: number | null;
-      actual_reps?: number | null;
-      completed?: boolean;
-    };
+      updates: {
+        actual_weight_kg?: number | null;
+        actual_reps?: number | null;
+        completed?: boolean;
+        weight_logging_mode?: WeightLoggingMode;
+      };
   }) => {
     const key = getDraftKey(exerciseId, setNumber);
     setSavingKey(key);
@@ -809,6 +1114,8 @@ export default function ClientWorkoutPage() {
         updates.actual_weight_kg ?? existing?.actual_weight_kg ?? null,
       actual_reps: updates.actual_reps ?? existing?.actual_reps ?? null,
       completed: updates.completed ?? existing?.completed ?? false,
+      weight_logging_mode:
+        updates.weight_logging_mode ?? existing?.weight_logging_mode ?? null,
     };
     const offlineSetPayload = {
       client_id: clientId,
@@ -993,6 +1300,11 @@ export default function ClientWorkoutPage() {
     const weightValue = getDisplayWeight(exercise, setNumber);
     const repsValue = getDisplayReps(exercise, setNumber);
 
+    if (checked && exercise.exercise_details?.rest) {
+      void primeRestTimerSound();
+      void requestRestTimerNotificationPermission();
+    }
+
     await upsertSetLog({
       clientId: client.id,
       clientProgramId: clientProgram.id,
@@ -1003,6 +1315,7 @@ export default function ClientWorkoutPage() {
         completed: checked,
         actual_weight_kg: weightValue === "" ? null : Number(weightValue),
         actual_reps: repsValue === "" ? null : Number(repsValue),
+        weight_logging_mode: getExerciseWeightLoggingMode(exercise),
       },
     });
 
@@ -1159,6 +1472,7 @@ export default function ClientWorkoutPage() {
         completed: setLog?.completed ?? false,
         actual_weight_kg: weightValue === "" ? null : Number(weightValue),
         actual_reps: repsValue === "" ? null : Number(repsValue),
+        weight_logging_mode: getExerciseWeightLoggingMode(exercise),
       },
     });
   };
@@ -1183,8 +1497,75 @@ export default function ClientWorkoutPage() {
         completed: setLog?.completed ?? false,
         actual_weight_kg: weightValue === "" ? null : Number(weightValue),
         actual_reps: repsValue === "" ? null : Number(repsValue),
+        weight_logging_mode: getExerciseWeightLoggingMode(exercise),
       },
     });
+  };
+
+  const handleWeightLoggingModeChange = async (
+    exercise: ClientProgramDayExercise,
+    mode: WeightLoggingMode
+  ) => {
+    if (!client || !clientProgram || !currentDay) return;
+
+    setWeightLoggingModes((prev) => ({
+      ...prev,
+      [exercise.id]: mode,
+    }));
+
+    const exerciseLogs = setLogs.filter(
+      (log) => log.client_program_day_exercise_id === exercise.id
+    );
+
+    if (exerciseLogs.length === 0) return;
+
+    setSetLogs((prev) =>
+      prev.map((log) =>
+        log.client_program_day_exercise_id === exercise.id
+          ? { ...log, weight_logging_mode: mode }
+          : log
+      )
+    );
+
+    if (!canTryNetworkWrite()) {
+      exerciseLogs.forEach((log) => {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log-mode"),
+          type: "set_log_update",
+          createdAt: queueCreatedAt(),
+          payload: {
+            id: log.id,
+            updates: { weight_logging_mode: mode },
+          },
+        });
+      });
+      setOfflineQueueCount(getOfflineWorkoutQueueCount());
+      return;
+    }
+
+    const { error } = await supabase
+      .from("client_program_set_logs")
+      .update({ weight_logging_mode: mode })
+      .eq("client_id", client.id)
+      .eq("client_program_id", clientProgram.id)
+      .eq("client_program_day_id", currentDay.id)
+      .eq("client_program_day_exercise_id", exercise.id)
+      .eq("log_date", today);
+
+    if (error) {
+      exerciseLogs.forEach((log) => {
+        queueOfflineWorkoutItem({
+          id: createOfflineId("set-log-mode"),
+          type: "set_log_update",
+          createdAt: queueCreatedAt(),
+          payload: {
+            id: log.id,
+            updates: { weight_logging_mode: mode },
+          },
+        });
+      });
+      setOfflineQueueCount(getOfflineWorkoutQueueCount());
+    }
   };
 
   const handleSwapBack = async (exercise: ClientProgramDayExercise) => {
@@ -1570,7 +1951,7 @@ export default function ClientWorkoutPage() {
       )}
 
       {loading ? (
-        <p className={styles.body}>Loading workout...</p>
+        <WorkoutSkeleton />
       ) : !client ? (
         <p className={styles.body}>{debugMessage || "Client not found."}</p>
       ) : !clientProgram || !currentDay ? (
@@ -1739,7 +2120,7 @@ activeExercise.exercise_details?.alternate && (
 
                   {activeProgressionSuggestion && (
                     <div className="mt-4 rounded-xl border border-gold bg-gold/10 p-4">
-                      <div className="flex items-start gap-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                         {companionEnabled && companionView?.currentForm.image_url && (
                           <img
                             src={companionView.currentForm.image_url}
@@ -1751,12 +2132,30 @@ activeExercise.exercise_details?.alternate && (
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold text-ink">
                             {companionEnabled && companionView
-                              ? companionView.currentForm.name
+                              ? `${activeCompanionDisplayName}: ${companionView.currentForm.name}`
                               : "Progression suggestion"}
                           </p>
                           <p className="mt-1 text-sm text-ink-muted">
-                            I feel like you can lift heavier this week; let&apos;s try {activeProgressionSuggestion.suggestedWeight}kg.
-                            You completed your last {activeProgressionSuggestion.sessionsAtWeight} sessions at {activeProgressionSuggestion.lastWeight}kg.
+                            {progressionNudgeLine ??
+                              `${
+                                companionEnabled && activeCompanionDisplayName
+                                  ? `${activeCompanionDisplayName} noticed`
+                                  : "Nice work"
+                              } you completed ${
+                                activeProgressionSuggestion.lastWeight
+                              }kg ${
+                                activeProgressionSuggestion.mode === "per_dumbbell"
+                                  ? "per dumbbell"
+                                  : "total"
+                              } for your last ${
+                                activeProgressionSuggestion.sessionsAtWeight
+                              } sessions. It might be time to try ${
+                                activeProgressionSuggestion.suggestedWeight
+                              }kg.`}
+                          </p>
+                          <p className="mt-2 text-xs text-ink-muted">
+                            Suggested only. Stay at your current weight if form,
+                            comfort, or confidence says so.
                           </p>
                         </div>
 
@@ -1768,10 +2167,89 @@ activeExercise.exercise_details?.alternate && (
                               activeProgressionSuggestion.suggestedWeight
                             )
                           }
-                          className="shrink-0 rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-ink hover:bg-gold/90"
+                          className="shrink-0 rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-ink hover:bg-gold/90 sm:self-center"
                         >
                           Use {activeProgressionSuggestion.suggestedWeight}kg
                         </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {(activeExerciseUsesDumbbells ||
+                    activeWeightLoggingMode === "per_dumbbell") && (
+                    <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                      <div className="flex items-start gap-3">
+                        {companionEnabled && companionView?.currentForm.image_url && (
+                          <img
+                            src={companionView.currentForm.image_url}
+                            alt={companionView.currentForm.name}
+                            className="h-10 w-10 shrink-0 rounded-full border border-blue-200 object-cover"
+                          />
+                        )}
+
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-ink">
+                            {companionEnabled && companionView
+                              ? `${activeCompanionDisplayName}: ${companionView.currentForm.name}`
+                              : "Weight logging"}
+                          </p>
+                          <p className="mt-1 text-sm text-ink-muted">
+                            Choose how you did this exercise today. It will make
+                            it easier to track your weight next time.
+                          </p>
+
+                          <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                            Weight logged as
+                          </p>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            {(
+                              [
+                                {
+                                  mode: "per_dumbbell" as const,
+                                  label: "One weight each hand",
+                                  detail: "E.g., one dumbbell in each hand.",
+                                },
+                                {
+                                  mode: "total" as const,
+                                  label: "One weight total",
+                                  detail: "E.g., one dumbbell, barbell, or machine.",
+                                },
+                              ] satisfies Array<{
+                                mode: WeightLoggingMode;
+                                label: string;
+                                detail: string;
+                              }>
+                            ).map((option) => {
+                              const selected =
+                                activeWeightLoggingMode === option.mode;
+
+                              return (
+                                <button
+                                  key={option.mode}
+                                  type="button"
+                                  onClick={() =>
+                                    handleWeightLoggingModeChange(
+                                      activeExercise,
+                                      option.mode
+                                    )
+                                  }
+                                  className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                                    selected
+                                      ? "border-blue-500 bg-white text-ink shadow-sm"
+                                      : "border-blue-100 bg-blue-50 text-ink-muted hover:bg-white"
+                                  }`}
+                                >
+                                  <span className="font-semibold">
+                                    {option.label}
+                                  </span>
+                                  <span className="mt-1 block text-xs">
+                                    {option.detail}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1821,7 +2299,7 @@ activeExercise.exercise_details?.alternate && (
                         setNumber
                       );
 
-                      const rememberedWeight =
+                      const rememberedWeightSummary =
                         activeExercise.exercise_name &&
                         previousWeights[activeExercise.exercise_name] !==
                           null &&
@@ -1829,6 +2307,10 @@ activeExercise.exercise_details?.alternate && (
                           undefined
                           ? previousWeights[activeExercise.exercise_name]
                           : null;
+                      const rememberedModeLabel =
+                        rememberedWeightSummary?.mode === "per_dumbbell"
+                          ? "one weight each hand"
+                          : "one weight total";
 
                       return (
                         <div
@@ -1867,9 +2349,10 @@ activeExercise.exercise_details?.alternate && (
                               placeholder="Weight"
                             />
 
-                            {rememberedWeight !== null && (
+                            {rememberedWeightSummary !== null && (
                               <p className="mt-1 text-xs text-ink-muted">
-                                Previous weight: {rememberedWeight} kg
+                                Previous: {rememberedWeightSummary.weight} kg,{" "}
+                                {rememberedModeLabel}
                               </p>
                             )}
                           </div>

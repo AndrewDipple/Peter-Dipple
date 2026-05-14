@@ -235,6 +235,18 @@ export default function TrainerDashboardPage() {
         return;
       }
 
+      const { error: inactivityNotificationError } = await supabase.rpc(
+        "notify_staff_client_inactivity",
+        { p_days_threshold: 7 }
+      );
+
+      if (inactivityNotificationError) {
+        console.error(
+          "Client inactivity notification check failed:",
+          inactivityNotificationError
+        );
+      }
+
       // Get auth data for all clients
       const clientsWithAuth = await Promise.all(
         clientsData.map(async (client) => {
@@ -812,7 +824,7 @@ export default function TrainerDashboardPage() {
                         {card.nutrition.label}
                       </p>
                       <p className="mt-1 text-xs opacity-70">
-                        Water: {card.waterCompleted ? "Complete âœ“" : "Not logged"}
+                        Water: {card.waterCompleted ? "Complete" : "Not logged"}
                       </p>
                     </div>
                   </div>
