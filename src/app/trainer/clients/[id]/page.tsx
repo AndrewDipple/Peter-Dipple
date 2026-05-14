@@ -830,7 +830,19 @@ if (clientData) {
           .select("*")
           .in("id", loggedExerciseIds);
 
-        setDayExercises((loggedExercises ?? []) as ClientProgramDayExercise[]);
+        const loggedExerciseMap = new Map(
+          ((loggedExercises ?? []) as ClientProgramDayExercise[]).map(
+            (exercise) => [exercise.id, exercise]
+          )
+        );
+
+        setDayExercises(
+          loggedExerciseIds
+            .map((id) => loggedExerciseMap.get(id))
+            .filter((exercise): exercise is ClientProgramDayExercise =>
+              Boolean(exercise)
+            )
+        );
       } else if (resolvedDayId) {
         const { data: assignedExercises } = await supabase
           .from("client_program_day_exercises")

@@ -386,6 +386,11 @@ const today = todayStr();
         const programExerciseIdMap = new Map(
           programExercises.map((exercise) => [exercise.id, exercise.exercise_id])
         );
+        const fallbackExerciseNameMap = new Map(
+          programExercises
+            .filter((exercise) => exercise.exercise_id)
+            .map((exercise) => [exercise.exercise_id as string, exercise.exercise_name])
+        );
         const equipmentByExerciseId = new Map(
           exerciseDetails?.map((exercise) => [
             exercise.id,
@@ -398,14 +403,24 @@ const today = todayStr();
             exercise.primary_equipment as string | null,
           ]) || []
         );
+        const nameByExerciseId = new Map(
+          exerciseDetails?.map((exercise) => [
+            exercise.id,
+            exercise.name as string | null,
+          ]) || []
+        );
 
         enrichedLogs = typedSetLogs.map((log) => {
-          const exerciseName = exerciseNameMap.get(
-            log.client_program_day_exercise_id
-          );
           const linkedExerciseId = programExerciseIdMap.get(
             log.client_program_day_exercise_id
           );
+          const exerciseName =
+            exerciseNameMap.get(log.client_program_day_exercise_id) ??
+            (linkedExerciseId ? nameByExerciseId.get(linkedExerciseId) : null) ??
+            (linkedExerciseId
+              ? fallbackExerciseNameMap.get(linkedExerciseId)
+              : null) ??
+            `Exercise ${log.client_program_day_exercise_id.slice(0, 8)}`;
           const equipment =
             (linkedExerciseId
               ? equipmentByExerciseId.get(linkedExerciseId)
@@ -424,19 +439,12 @@ const today = todayStr();
             effective_weight_kg: effectiveWeightKg,
           };
         });
-        const namedLogs = enrichedLogs
-          .map((log) => ({
-            ...log,
-          }))
-          .filter(
-            (
-              log
-            ): log is CompletedSetLog & {
-              exercise_name: string;
-              effective_weight_kg: number;
-            } =>
-              Boolean(log.exercise_name)
-          );
+        const namedLogs = enrichedLogs as Array<
+          CompletedSetLog & {
+            exercise_name: string;
+            effective_weight_kg: number;
+          }
+        >;
 
         // Group by exercise and find max weight for each
         const prMap = new Map<string, ExercisePR>();
