@@ -10,6 +10,8 @@ type ClientMessage = {
   id: string;
   client_id: string;
   sender_role: "client" | "trainer";
+  sender_profile_id: string | null;
+  sender_display_name: string | null;
   body: string;
   context_type: "general" | "workout_day" | "nutrition";
   context_id: string | null;
@@ -21,6 +23,7 @@ type ClientMessage = {
 
 type TrainerClientMessagesProps = {
   clientId: string;
+  clientName?: string;
 };
 
 const contextLabels: Record<ClientMessage["context_type"], string> = {
@@ -31,11 +34,16 @@ const contextLabels: Record<ClientMessage["context_type"], string> = {
 
 export default function TrainerClientMessages({
   clientId,
+  clientName = "Client",
 }: TrainerClientMessagesProps) {
   const [messages, setMessages] = useState<ClientMessage[]>([]);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [newMessage, setNewMessage] = useState("");
+  const [staffProfileId, setStaffProfileId] = useState<string | null>(null);
+  const [staffDisplayName, setStaffDisplayName] = useState("Trainer");
   const [loading, setLoading] = useState(true);
   const [sendingReplyId, setSendingReplyId] = useState<string | null>(null);
+  const [sendingNewMessage, setSendingNewMessage] = useState(false);
 
   const unreadCount = useMemo(
     () =>
@@ -94,6 +102,71 @@ export default function TrainerClientMessages({
     loadMessages();
   }, [clientId]);
 
+  useEffect(() => {
+    const loadStaffProfile = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      setStaffProfileId(user.id);
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle<{ full_name: string | null }>();
+
+      const name = profile?.full_name?.trim();
+      if (name) setStaffDisplayName(name);
+    };
+
+    loadStaffProfile();
+  }, []);
+
+  const getSenderLabel = (message: ClientMessage) => {
+    if (message.sender_display_name?.trim()) {
+      return message.sender_display_name.trim();
+    }
+
+    return message.sender_role === "trainer" ? "Trainer" : clientName;
+  };
+
+  const handleStartConversation = async () => {
+    const draft = newMessage.trim();
+    if (!draft) return;
+
+    setSendingNewMessage(true);
+
+    const { data, error } = await supabase
+      .from("client_messages")
+      .insert({
+        client_id: clientId,
+        sender_role: "trainer",
+        sender_profile_id: staffProfileId,
+        sender_display_name: staffDisplayName,
+        body: draft,
+        context_type: "general",
+        context_id: null,
+        context_label: "General message",
+        parent_message_id: null,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      alert("Message could not be sent. Please try again.");
+      setSendingNewMessage(false);
+      return;
+    }
+
+    setMessages((prev) => [data, ...prev]);
+    setNewMessage("");
+    notifyClientMessagePush(data.id);
+    setSendingNewMessage(false);
+  };
+
   const handleReply = async (message: ClientMessage) => {
     const draft = replyDrafts[message.id]?.trim();
     if (!draft) return;
@@ -105,6 +178,8 @@ export default function TrainerClientMessages({
       .insert({
         client_id: clientId,
         sender_role: "trainer",
+        sender_profile_id: staffProfileId,
+        sender_display_name: staffDisplayName,
         body: draft,
         context_type: message.context_type,
         context_id: message.context_id,
@@ -144,6 +219,28 @@ export default function TrainerClientMessages({
       </div>
 
       <div className="mt-4 space-y-3">
+        <div className="rounded-xl border border-border-subtle bg-surface-sunken p-4">
+          <label className="text-sm font-semibold text-ink">
+            Start a message
+          </label>
+          <textarea
+            value={newMessage}
+            onChange={(event) => setNewMessage(event.target.value)}
+            className={styles.textarea}
+            rows={3}
+            placeholder={`Send ${clientName} a message...`}
+          />
+          <button
+            type="button"
+            onClick={handleStartConversation}
+            disabled={sendingNewMessage || newMessage.trim().length === 0}
+            className={`${styles.buttonPrimary} mt-2 inline-flex items-center gap-2 disabled:opacity-50`}
+          >
+            <Send size={16} />
+            {sendingNewMessage ? "Sending..." : "Send message"}
+          </button>
+        </div>
+
         {loading ? (
           <p className="text-sm text-ink-muted">Loading messages...</p>
         ) : messages.length === 0 ? (
@@ -177,7 +274,7 @@ export default function TrainerClientMessages({
               </div>
 
               <p className="mt-2 text-xs font-medium uppercase tracking-wide text-ink-muted">
-                {message.sender_role === "trainer" ? "Trainer reply" : "Client"}
+                {getSenderLabel(message)}
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
                 {message.body}

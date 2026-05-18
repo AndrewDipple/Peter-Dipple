@@ -145,7 +145,10 @@ export default function MessagesPage() {
                   {selectedClient.email}
                 </p>
               </div>
-              <TrainerClientMessages clientId={selectedClient.id} />
+              <TrainerClientMessages
+                clientId={selectedClient.id}
+                clientName={selectedClient.full_name}
+              />
             </div>
           )}
         </>

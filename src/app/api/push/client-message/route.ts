@@ -7,10 +7,19 @@ export const runtime = "nodejs";
 const isStaffRole = (role: string | null | undefined) =>
   role === "trainer" || role === "admin";
 
+const getDisplayName = (
+  name: string | null | undefined,
+  fallback: string
+) => {
+  const trimmed = name?.trim();
+  return trimmed || fallback;
+};
+
 type ClientMessage = {
   id: string;
   client_id: string;
   sender_role: "client" | "trainer";
+  sender_display_name: string | null;
   body: string;
   context_label: string | null;
 };
@@ -76,7 +85,7 @@ export async function POST(request: NextRequest) {
 
   const { data: message, error: messageError } = await supabaseAdmin
     .from("client_messages")
-    .select("id, client_id, sender_role, body, context_label")
+    .select("id, client_id, sender_role, sender_display_name, body, context_label")
     .eq("id", messageId)
     .maybeSingle<ClientMessage>();
 
@@ -123,7 +132,12 @@ export async function POST(request: NextRequest) {
       recipientUserIds = [client.profile_id];
     }
 
-    title = "Peter replied";
+    const fallbackName = profile?.role === "admin" ? "Admin" : "Your trainer";
+    const senderName = getDisplayName(
+      profile?.full_name ?? message.sender_display_name,
+      fallbackName
+    );
+    title = `${senderName} replied`;
     body = message.context_label
       ? `${message.context_label}: ${message.body}`
       : message.body;

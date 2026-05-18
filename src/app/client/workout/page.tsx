@@ -1379,13 +1379,14 @@ export default function ClientWorkoutPage() {
     });
 
     if (checked && canTryNetworkWrite()) {
-      const unlockedAchievements = await updateStreak(
+      const unlockedAchievements: string[] = [];
+      await updateStreak(
         client.id,
         "workout",
         today
       ).catch(() => []);
 
-      if (unlockedAchievements.length > 0) {
+      if (false) {
         const achievementType = unlockedAchievements[0];
 
         const achievementDetails: Record<string, CelebrationAchievement> = {

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { getMondayOf, todayStr } from "@/lib/dates";
-import { updateStreak, checkStreakReminders } from "@/lib/streaks";
+import { updateStreak } from "@/lib/streaks";
 import TourModal from "@/components/TourModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
@@ -21,8 +21,6 @@ import {
   COMPANION_XP_REWARDS,
   type ActiveCompanionView,
 } from "@/lib/companions";
-// import StreakDisplay from "@/components/StreakDisplay"; // Hidden for launch â€” see commit notes.
-// import Leaderboard from "@/components/Leaderboard";     // Removed for launch â€” competitive mechanics deferred.
 import { CalendarClock, Sparkles } from "lucide-react";
 
 type Client = {
@@ -378,7 +376,6 @@ const [showTour, setShowTour] = useState(false);
 if (!clientData.tour_completed_at) {
   setShowTour(true);
 }
-    await checkStreakReminders(clientData.id);
 
     const { data: trackingData } = await supabase
       .from("daily_tracking")
@@ -1202,15 +1199,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
               presentation={today === weekStart ? "modal" : "card"}
             />
 
-            {/* StreakDisplay hidden for launch â€” kept rendered=false so the underlying
-                streak mechanic still records data in the background. Re-enable by
-                uncommenting the import and the line below. */}
-            {/* <div className="min-w-0">
-              <StreakDisplay clientId={client.id} />
-            </div> */}
-
-            {/* Leaderboard removed for launch â€” competitive mechanics deferred.
-                Component file remains in /components for future use. */}
+            {/* Background habit tracking stays silent; streak and leaderboard UI are intentionally hidden. */}
           </div>
         )}
       </div>

@@ -1,5 +1,11 @@
 const CACHE_NAME = "pt-app-v1";
-const APP_SHELL = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const APP_SHELL = [
+  "/",
+  "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/notification-badge.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -78,7 +84,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      badge: "/notification-badge.png",
       data: {
         url: payload.url || "/notifications",
       },

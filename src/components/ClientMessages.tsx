@@ -9,6 +9,8 @@ import { notifyClientMessagePush } from "@/lib/clientPush";
 type ClientMessage = {
   id: string;
   sender_role: "client" | "trainer";
+  sender_profile_id: string | null;
+  sender_display_name: string | null;
   body: string;
   context_type: "general" | "workout_day" | "nutrition";
   context_label: string | null;
@@ -29,6 +31,8 @@ const contextLabels: Record<ClientMessage["context_type"], string> = {
 export default function ClientMessages({ clientId }: ClientMessagesProps) {
   const [messages, setMessages] = useState<ClientMessage[]>([]);
   const [body, setBody] = useState("");
+  const [clientProfileId, setClientProfileId] = useState<string | null>(null);
+  const [clientDisplayName, setClientDisplayName] = useState("Client");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
 
@@ -37,7 +41,7 @@ export default function ClientMessages({ clientId }: ClientMessagesProps) {
 
     const { data, error } = await supabase
       .from("client_messages")
-      .select("id, sender_role, body, context_type, context_label, read_by_client_at, created_at")
+      .select("id, sender_role, sender_profile_id, sender_display_name, body, context_type, context_label, read_by_client_at, created_at")
       .eq("client_id", clientId)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -67,6 +71,20 @@ export default function ClientMessages({ clientId }: ClientMessagesProps) {
   }, [clientId]);
 
   useEffect(() => {
+    const loadClientIdentity = async () => {
+      const { data } = await supabase
+        .from("clients")
+        .select("full_name, profile_id")
+        .eq("id", clientId)
+        .maybeSingle<{ full_name: string | null; profile_id: string | null }>();
+
+      const name = data?.full_name?.trim();
+      setClientDisplayName(name || "Client");
+      setClientProfileId(data?.profile_id ?? null);
+    };
+
+    loadClientIdentity();
+
     const timeoutId = window.setTimeout(() => {
       loadMessages();
     }, 0);
@@ -85,12 +103,14 @@ export default function ClientMessages({ clientId }: ClientMessagesProps) {
       .insert({
         client_id: clientId,
         sender_role: "client",
+        sender_profile_id: clientProfileId,
+        sender_display_name: clientDisplayName,
         context_type: "general",
         context_id: null,
         context_label: "General message",
         body: trimmed,
       })
-      .select("id, sender_role, body, context_type, context_label, read_by_client_at, created_at")
+      .select("id, sender_role, sender_profile_id, sender_display_name, body, context_type, context_label, read_by_client_at, created_at")
       .single();
 
     if (error || !data) {
@@ -164,7 +184,9 @@ export default function ClientMessages({ clientId }: ClientMessagesProps) {
                   </p>
                 </div>
                 <p className="mt-2 text-xs font-medium uppercase tracking-wide text-ink-muted">
-                  {message.sender_role === "trainer" ? "Peter" : "You"}
+                  {message.sender_role === "trainer"
+                    ? message.sender_display_name?.trim() || "Trainer"
+                    : "You"}
                 </p>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
                   {message.body}

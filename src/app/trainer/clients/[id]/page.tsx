@@ -1987,7 +1987,10 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
           </section>
 
           <section>
-            <TrainerClientMessages clientId={client.id} />
+            <TrainerClientMessages
+              clientId={client.id}
+              clientName={client.full_name}
+            />
           </section>
 
           <TrainerClientInsights clientId={client.id} />

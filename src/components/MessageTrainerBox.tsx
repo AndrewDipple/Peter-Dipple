@@ -11,6 +11,8 @@ type MessageContext = "general" | "workout_day" | "nutrition";
 type ClientMessage = {
   id: string;
   sender_role: "client" | "trainer";
+  sender_profile_id: string | null;
+  sender_display_name: string | null;
   body: string;
   context_label: string | null;
   created_at: string;
@@ -47,16 +49,30 @@ export default function MessageTrainerBox({
 }: MessageTrainerBoxProps) {
   const [body, setBody] = useState("");
   const [messages, setMessages] = useState<ClientMessage[]>([]);
+  const [clientProfileId, setClientProfileId] = useState<string | null>(null);
+  const [clientDisplayName, setClientDisplayName] = useState("Client");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
+    const loadClientIdentity = async () => {
+      const { data } = await supabase
+        .from("clients")
+        .select("full_name, profile_id")
+        .eq("id", clientId)
+        .maybeSingle<{ full_name: string | null; profile_id: string | null }>();
+
+      const name = data?.full_name?.trim();
+      setClientDisplayName(name || "Client");
+      setClientProfileId(data?.profile_id ?? null);
+    };
+
     const loadMessages = async () => {
       setLoading(true);
 
       let query = supabase
         .from("client_messages")
-        .select("id, sender_role, body, context_label, created_at")
+        .select("id, sender_role, sender_profile_id, sender_display_name, body, context_label, created_at")
         .eq("client_id", clientId)
         .eq("context_type", contextType)
         .order("created_at", { ascending: false })
@@ -71,6 +87,7 @@ export default function MessageTrainerBox({
       setLoading(false);
     };
 
+    loadClientIdentity();
     loadMessages();
   }, [clientId, contextId, contextType]);
 
@@ -85,12 +102,14 @@ export default function MessageTrainerBox({
       .insert({
         client_id: clientId,
         sender_role: "client",
+        sender_profile_id: clientProfileId,
+        sender_display_name: clientDisplayName,
         context_type: contextType,
         context_id: contextId,
         context_label: contextLabel,
         body: trimmed,
       })
-      .select("id, sender_role, body, context_label, created_at")
+      .select("id, sender_role, sender_profile_id, sender_display_name, body, context_label, created_at")
       .single();
 
     if (error || !data) {
@@ -148,7 +167,9 @@ export default function MessageTrainerBox({
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                    {message.sender_role === "trainer" ? "Trainer" : "You"}
+                    {message.sender_role === "trainer"
+                      ? message.sender_display_name?.trim() || "Trainer"
+                      : "You"}
                   </p>
                   <p className="text-xs text-ink-muted">
                     {new Date(message.created_at).toLocaleDateString("en-GB", {

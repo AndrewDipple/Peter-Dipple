@@ -10,6 +10,7 @@ export type ClientReplyContext = "general" | "workout_day" | "nutrition";
 type TrainerReply = {
   id: string;
   body: string;
+  sender_display_name: string | null;
   context_type: ClientReplyContext;
   context_label: string | null;
   created_at: string;
@@ -36,6 +37,7 @@ export default function ClientUnreadRepliesBanner({
   const [dismissing, setDismissing] = useState(false);
 
   const latestReply = replies[0] ?? null;
+  const senderName = latestReply?.sender_display_name?.trim() || "Trainer";
 
   const label = useMemo(() => {
     if (!latestReply) return "Trainer reply";
@@ -53,7 +55,7 @@ export default function ClientUnreadRepliesBanner({
 
       const { data, error } = await supabase
         .from("client_messages")
-        .select("id, body, context_type, context_label, created_at")
+        .select("id, body, sender_display_name, context_type, context_label, created_at")
         .eq("client_id", clientId)
         .eq("sender_role", "trainer")
         .is("read_by_client_at", null)
@@ -102,7 +104,7 @@ export default function ClientUnreadRepliesBanner({
 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-ink">
-            Your trainer replied{replies.length > 1 ? ` (${replies.length})` : ""}
+            {senderName} replied{replies.length > 1 ? ` (${replies.length})` : ""}
           </p>
           <p className="mt-1 text-xs font-medium uppercase tracking-wide text-ink-muted">
             {label}
