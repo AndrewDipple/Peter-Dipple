@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { touchClientLastSeen } from "@/lib/clientActivity";
 
 export default function ClientGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -36,10 +37,29 @@ export default function ClientGuard({ children }: { children: React.ReactNode })
 
       setAuthorized(true);
       setLoading(false);
+      touchClientLastSeen();
     };
 
     checkAuth();
   }, [router]);
+
+  useEffect(() => {
+    if (!authorized) return;
+
+    const touchOnFocus = () => {
+      if (document.visibilityState === "visible") {
+        touchClientLastSeen();
+      }
+    };
+
+    window.addEventListener("focus", touchClientLastSeen);
+    document.addEventListener("visibilitychange", touchOnFocus);
+
+    return () => {
+      window.removeEventListener("focus", touchClientLastSeen);
+      document.removeEventListener("visibilitychange", touchOnFocus);
+    };
+  }, [authorized]);
 
   if (loading) {
     return (

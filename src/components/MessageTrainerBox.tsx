@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { notifyClientMessagePush } from "@/lib/clientPush";
 
 type MessageContext = "general" | "workout_day" | "nutrition";
 
@@ -100,6 +101,7 @@ export default function MessageTrainerBox({
 
     setMessages((prev) => [data, ...prev].slice(0, 5));
     setBody("");
+    notifyClientMessagePush(data.id);
     setSending(false);
   };
 

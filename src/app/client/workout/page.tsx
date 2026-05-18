@@ -478,6 +478,7 @@ export default function ClientWorkoutPage() {
         .from("client_programs")
         .select("*")
         .eq("client_id", clientData.id)
+        .or("status.eq.active,status.is.null")
         .order("created_at", { ascending: false })
         .limit(1);
 

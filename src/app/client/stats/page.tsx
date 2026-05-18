@@ -9,7 +9,11 @@ import { awardBondXp, COMPANION_XP_REWARDS } from "@/lib/companions";
 import { getLoggedWeightMultiplier } from "@/lib/equipment";
 import type { WeightLoggingMode } from "@/lib/equipment";
 import GuideLink from "@/components/GuideLink";
-import { ChevronRight, Trash2, Trophy, TrendingUp, Sparkles, Weight, X } from "lucide-react";
+import ProgressPhotoComparison, {
+  buildProgressPhotoWeeks,
+  type ComparisonProgressPhoto,
+} from "@/components/ProgressPhotoComparison";
+import { Trophy, TrendingUp, Sparkles, Weight, X } from "lucide-react";
 import { addDays, todayStr } from "@/lib/dates";
 import {
   isCompanionEnabledForClient,
@@ -51,14 +55,6 @@ type ProgressPhoto = {
   log_date: string;
   note: string | null;
   photo_type: "front" | "back" | "side";
-};
-
-type PhotoWeek = {
-  log_date: string;
-  week_number: number;
-  front: ProgressPhoto | null;
-  back: ProgressPhoto | null;
-  side: ProgressPhoto | null;
 };
 
 type MeasurementLog = {
@@ -288,44 +284,9 @@ const today = todayStr();
       waist: Number(log.waist_cm),
     }));
 
-  // Group photos into weeks
   const photoWeeks = useMemo(() => {
-    const grouped = photos.reduce((acc, photo) => {
-      if (!acc[photo.log_date]) {
-        acc[photo.log_date] = {
-          log_date: photo.log_date,
-          week_number: 0,
-          front: null,
-          back: null,
-          side: null,
-        };
-      }
-      acc[photo.log_date][photo.photo_type] = photo;
-      return acc;
-    }, {} as Record<string, PhotoWeek>);
-
-    const weeks = Object.values(grouped).sort((a, b) =>
-      a.log_date.localeCompare(b.log_date)
-    );
-
-    // Assign week numbers
-    weeks.forEach((week, index) => {
-      week.week_number = index + 1;
-    });
-
-    return weeks;
+    return buildProgressPhotoWeeks(photos as ComparisonProgressPhoto[]);
   }, [photos]);
-
-  const displayWeeks = useMemo(() => {
-    if (photoWeeks.length === 0) return [];
-    if (photoWeeks.length === 1) return photoWeeks;
-    if (showAllWeeks) return photoWeeks;
-
-    // Show first and last only
-    return [photoWeeks[0], photoWeeks[photoWeeks.length - 1]];
-  }, [photoWeeks, showAllWeeks]);
-
-  const hasMiddleWeeks = photoWeeks.length > 2;
 
   useEffect(() => {
     if (personalBestInsights.length <= 1) return;
@@ -1440,193 +1401,27 @@ const handleUploadPhotos = async () => {
               </div>
             </div>
 
-{photoWeeks.length === 0 ? (
-  <p className={`${styles.body} mt-6`}>
-    No progress photos yet. Upload your first set!
-  </p>
-) : (
-  <div className="mt-6">
-    {/* Photo comparison rows */}
-    <div className="space-y-6">
-      {/* Front Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Front</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`front-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
-                </p>
-                {week.front ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEnlargedPhoto({
-                        photo: week.front as ProgressPhoto,
-                        label: "Front",
-                        weekNumber: week.week_number,
-                      })
-                    }
-                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
-                  >
-                    <img
-                      src={getPhotoUrl(week.front)}
-                      alt="Front"
-                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
-              </div>
-
-              {/* Arrow between first and last */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <button
-                  onClick={() => setShowAllWeeks(true)}
-                  className="flex flex-col items-center gap-1 px-4 text-gold hover:opacity-80"
-                  title="Show all weeks"
-                >
-                  <ChevronRight size={32} />
-                  <span className="text-xs font-medium">
-                    {photoWeeks.length - 2} week{photoWeeks.length - 2 !== 1 ? "s" : ""}
-                  </span>
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Back Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Back</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`back-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
-                </p>
-                {week.back ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEnlargedPhoto({
-                        photo: week.back as ProgressPhoto,
-                        label: "Back",
-                        weekNumber: week.week_number,
-                      })
-                    }
-                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
-                  >
-                    <img
-                      src={getPhotoUrl(week.back)}
-                      alt="Back"
-                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
-              </div>
-
-              {/* Arrow (invisible spacer to maintain alignment) */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <div className="w-20" />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Side Row */}
-      <div>
-        <p className="mb-2 text-sm font-semibold text-ink">Side</p>
-        <div className="flex items-center gap-4">
-          {displayWeeks.map((week, index) => (
-            <div key={`side-${week.log_date}`} className="flex items-center gap-4">
-              {/* Week Card */}
-              <div className="flex-1">
-                <p className="mb-2 text-xs font-medium text-ink-muted">
-                  Week {week.week_number} - {week.log_date}
-                </p>
-                {week.side ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEnlargedPhoto({
-                        photo: week.side as ProgressPhoto,
-                        label: "Side",
-                        weekNumber: week.week_number,
-                      })
-                    }
-                    className="block w-full overflow-hidden rounded-lg focus:outline-none focus:ring-2 focus:ring-gold"
-                  >
-                    <img
-                      src={getPhotoUrl(week.side)}
-                      alt="Side"
-                      className="h-48 w-full object-cover transition hover:scale-[1.02]"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex h-48 items-center justify-center rounded-lg bg-surface-sunken text-xs text-ink-muted">
-                    No photo
-                  </div>
-                )}
-              </div>
-
-              {/* Arrow (invisible spacer to maintain alignment) */}
-              {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-                <div className="w-20" />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Delete buttons row */}
-      <div className="flex items-center gap-4">
-        {displayWeeks.map((week, index) => (
-          <div key={`delete-${week.log_date}`} className="flex items-center gap-4">
-            <div className="flex-1">
-              <button
-                onClick={() => handleDeleteWeek(week.log_date)}
-                disabled={deletingWeek === week.log_date}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
-                title="Delete this week"
-              >
-                <Trash2 size={16} />
-                Delete Week {week.week_number}
-              </button>
-            </div>
-
-            {/* Arrow spacer */}
-            {index === 0 && !showAllWeeks && hasMiddleWeeks && (
-              <div className="w-20" />
+            {photoWeeks.length === 0 ? (
+              <p className={`${styles.body} mt-6`}>
+                No progress photos yet. Upload your first set!
+              </p>
+            ) : (
+              <ProgressPhotoComparison
+                photoWeeks={photoWeeks}
+                showAllWeeks={showAllWeeks}
+                onShowAllWeeksChange={setShowAllWeeks}
+                getPhotoUrl={getPhotoUrl}
+                onPhotoClick={(photo, label, weekNumber) =>
+                  setEnlargedPhoto({
+                    photo: photo as ProgressPhoto,
+                    label,
+                    weekNumber,
+                  })
+                }
+                onDeleteWeek={handleDeleteWeek}
+                deletingWeek={deletingWeek}
+              />
             )}
-          </div>
-        ))}
-      </div>
-    </div>
-
-    {showAllWeeks && hasMiddleWeeks && (
-      <button
-        onClick={() => setShowAllWeeks(false)}
-        className="mt-4 text-sm text-gold hover:underline"
-      >
-        Show only first and latest
-      </button>
-    )}
-  </div>
-)}
           </div>
 
           <div className={styles.card}>

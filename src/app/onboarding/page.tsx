@@ -261,6 +261,7 @@ export default function ClientOnboardingPage() {
           client_id: clientId,
           program_template_id: templateId,
           current_day_index: 0,
+          status: "active",
         },
       ])
       .select()

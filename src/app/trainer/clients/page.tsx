@@ -10,7 +10,9 @@ type Client = {
   full_name: string;
   email: string;
   profile_id: string | null;
+  last_seen_at: string | null;
   last_sign_in_at: string | null;
+  last_active_at: string | null;
 };
 
 export default function TrainerClientsPage() {
@@ -21,21 +23,36 @@ export default function TrainerClientsPage() {
     const loadClients = async () => {
       const { data, error } = await supabase
         .from("clients")
-        .select("id, full_name, email, profile_id, profiles(last_sign_in_at)")
+        .select("id, full_name, email, profile_id, last_seen_at, profiles(last_sign_in_at)")
         .order("full_name", { ascending: true });
 
-      if (error) {
-        console.error("clients query failed:", error);
+      let clientRows: any[] | null = data;
+      let clientError = error;
+
+      if (error?.code === "42703") {
+        const fallback = await supabase
+          .from("clients")
+          .select("id, full_name, email, profile_id, profiles(last_sign_in_at)")
+          .order("full_name", { ascending: true });
+
+        clientRows = fallback.data;
+        clientError = fallback.error;
+      }
+
+      if (clientError) {
+        console.error("clients query failed:", clientError);
         setLoading(false);
         return;
       }
 
-      const flattened: Client[] = (data ?? []).map((c: any) => ({
+      const flattened: Client[] = (clientRows ?? []).map((c: any) => ({
         id: c.id,
         full_name: c.full_name,
         email: c.email,
         profile_id: c.profile_id,
+        last_seen_at: c.last_seen_at ?? null,
         last_sign_in_at: c.profiles?.last_sign_in_at ?? null,
+        last_active_at: c.last_seen_at ?? c.profiles?.last_sign_in_at ?? null,
       }));
 
       setClients(flattened);
@@ -45,13 +62,13 @@ export default function TrainerClientsPage() {
     loadClients();
   }, []);
 
-  const getLastActive = (lastSignIn: string | null) => {
-    if (!lastSignIn) {
-      return { text: "Never logged in", color: "text-red-600" };
+  const getLastActive = (lastActive: string | null) => {
+    if (!lastActive) {
+      return { text: "No activity recorded", color: "text-red-600" };
     }
 
     const days = Math.floor(
-      (Date.now() - new Date(lastSignIn).getTime()) / (1000 * 60 * 60 * 24)
+      (Date.now() - new Date(lastActive).getTime()) / (1000 * 60 * 60 * 24)
     );
 
     let text: string;
@@ -83,7 +100,7 @@ export default function TrainerClientsPage() {
       ) : (
         <div className="space-y-4">
           {clients.map((client) => {
-            const { text, color } = getLastActive(client.last_sign_in_at);
+            const { text, color } = getLastActive(client.last_active_at);
             return (
               <Link
                 key={client.id}

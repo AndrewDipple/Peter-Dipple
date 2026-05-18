@@ -6,10 +6,15 @@ import { withSignedProgressPhotoUrls } from "@/lib/privateStorage";
 import { notifyProgramAssigned } from "@/components/notifications";
 import TrainerClientMessages from "@/components/TrainerClientMessages";
 import TrainerClientInsights from "@/components/TrainerClientInsights";
+import ProgressPhotoComparison, {
+  buildProgressPhotoWeeks,
+  type ComparisonProgressPhoto,
+} from "@/components/ProgressPhotoComparison";
 import { styles } from "@/lib/design";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
+import { X } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -78,6 +83,11 @@ type ClientProgram = {
   client_id: string;
   program_template_id: string | null;
   current_day_index: number | null;
+  created_at?: string | null;
+  status?: "active" | "assigning" | "superseded" | string | null;
+  archived_at?: string | null;
+  completed_at?: string | null;
+  superseded_by_program_id?: string | null;
 };
 
 type ClientProgramDay = {
@@ -144,6 +154,7 @@ type ProgressPhoto = {
   signed_url?: string | null;
   log_date: string;
   note: string | null;
+  photo_type: "front" | "back" | "side";
 };
 
 type DailyTracking = {
@@ -252,6 +263,8 @@ export default function ClientDetailPage({ params }: PageProps) {
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
+  const [programHistory, setProgramHistory] = useState<ClientProgram[]>([]);
+  const [restoringProgramId, setRestoringProgramId] = useState<string | null>(null);
   const [programDays, setProgramDays] = useState<ClientProgramDay[]>([]);
   const [reviewedDayId, setReviewedDayId] = useState<string | null>(null);
 
@@ -279,6 +292,12 @@ export default function ClientDetailPage({ params }: PageProps) {
   const [latestMeasurements, setLatestMeasurements] = useState<MeasurementLog | null>(null);
   const [measurementLogs, setMeasurementLogs] = useState<MeasurementLog[]>([]);
   const [progressPhotos, setProgressPhotos] = useState<ProgressPhoto[]>([]);
+  const [showAllPhotoWeeks, setShowAllPhotoWeeks] = useState(false);
+  const [enlargedPhoto, setEnlargedPhoto] = useState<{
+    photo: ProgressPhoto;
+    label: string;
+    weekNumber: number;
+  } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [assigningTemplate, setAssigningTemplate] = useState(false);
@@ -299,6 +318,14 @@ const [retentionUpdating, setRetentionUpdating] = useState<string | null>(null);
 const [retentionError, setRetentionError] = useState<string | null>(null);
 const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>([]);
 const [auditLoading, setAuditLoading] = useState(false);
+
+  const photoWeeks = useMemo(
+    () => buildProgressPhotoWeeks(progressPhotos as ComparisonProgressPhoto[]),
+    [progressPhotos]
+  );
+
+  const getPhotoUrl = (photo: ComparisonProgressPhoto) =>
+    photo.signed_url ?? photo.image_url;
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -613,6 +640,7 @@ if (clientData) {
         .from("client_programs")
         .select("*")
         .eq("client_id", id)
+        .or("status.eq.active,status.is.null")
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -630,7 +658,18 @@ if (clientData) {
           .order("sort_order", { ascending: true });
 
         setProgramDays(daysData ?? []);
+      } else {
+        setClientProgram(null);
+        setProgramDays([]);
       }
+
+      const { data: allProgramData } = await supabase
+        .from("client_programs")
+        .select("*")
+        .eq("client_id", id)
+        .order("created_at", { ascending: false });
+
+      setProgramHistory((allProgramData ?? []) as ClientProgram[]);
 
       setLoading(false);
     };
@@ -868,19 +907,18 @@ if (clientData) {
     const { data: existingPrograms } = await supabase
       .from("client_programs")
       .select("id")
-      .eq("client_id", clientId);
+      .eq("client_id", clientId)
+      .or("status.eq.active,status.is.null");
 
     if (existingPrograms?.length) {
       const confirmed = window.confirm(
-        "This replaces the client's whole active programme. It is not for swapping one exercise, and it may remove existing programme progress depending on database links. Use Edit Active Programme for individual exercise changes. Continue?"
+        "This will assign a new active programme and archive the current one for history. Use Edit Active Programme for individual exercise changes. Continue?"
       );
 
       if (!confirmed) {
         setAssigningTemplate(false);
         return;
       }
-
-      await supabase.from("client_programs").delete().eq("client_id", clientId);
     }
 
     const { data: newProgram, error: programError } = await supabase
@@ -890,6 +928,7 @@ if (clientData) {
           client_id: clientId,
           program_template_id: selectedTemplateId,
           current_day_index: 0,
+          status: "assigning",
         },
       ])
       .select()
@@ -976,6 +1015,24 @@ if (templateExercises?.length) {
       }
     }
 
+if (existingPrograms?.length) {
+  await supabase
+    .from("client_programs")
+    .update({
+      status: "superseded",
+      archived_at: new Date().toISOString(),
+      superseded_by_program_id: newProgram.id,
+    })
+    .eq("client_id", clientId)
+    .neq("id", newProgram.id)
+    .or("status.eq.active,status.is.null");
+}
+
+await supabase
+  .from("client_programs")
+  .update({ status: "active" })
+  .eq("id", newProgram.id);
+
 const { data: refreshedDays } = await supabase
   .from("client_program_days")
   .select("*")
@@ -993,9 +1050,102 @@ await notifyProgramAssigned(clientId, client.full_name, template.name);
 }
 
 alert("Template assigned!");
-setClientProgram(newProgram);
+setClientProgram({ ...newProgram, status: "active" });
+setProgramHistory((prev) => [
+  { ...newProgram, status: "active" },
+  ...prev
+    .filter((program) => program.id !== newProgram.id)
+    .map((program) =>
+      program.status === "active" || program.status === null
+        ? {
+            ...program,
+            status: "superseded",
+            archived_at: new Date().toISOString(),
+            superseded_by_program_id: newProgram.id,
+          }
+        : program
+    ),
+]);
 setAssigningTemplate(false);
   };
+const handleRestoreProgram = async (program: ClientProgram) => {
+  if (!client || !clientProgram || restoringProgramId) return;
+  if (program.id === clientProgram.id) return;
+
+  const templateName =
+    templates.find((template) => template.id === program.program_template_id)
+      ?.name ?? "this programme";
+
+  const confirmed = window.confirm(
+    `Restore "${templateName}" as the active programme for ${client.full_name}? The current active programme will be archived, not deleted.`
+  );
+
+  if (!confirmed) return;
+
+  setRestoringProgramId(program.id);
+  const now = new Date().toISOString();
+
+  const { error: archiveError } = await supabase
+    .from("client_programs")
+    .update({
+      status: "superseded",
+      archived_at: now,
+      superseded_by_program_id: program.id,
+    })
+    .eq("id", clientProgram.id);
+
+  if (archiveError) {
+    alert("Could not archive the current programme.");
+    setRestoringProgramId(null);
+    return;
+  }
+
+  const { data: restoredProgram, error: restoreError } = await supabase
+    .from("client_programs")
+    .update({
+      status: "active",
+      archived_at: null,
+      superseded_by_program_id: null,
+    })
+    .eq("id", program.id)
+    .select()
+    .single();
+
+  if (restoreError || !restoredProgram) {
+    alert("Could not restore programme. Please refresh and check programme history.");
+    setRestoringProgramId(null);
+    return;
+  }
+
+  const { data: restoredDays } = await supabase
+    .from("client_program_days")
+    .select("*")
+    .eq("client_program_id", restoredProgram.id)
+    .order("sort_order", { ascending: true });
+
+  setClientProgram(restoredProgram as ClientProgram);
+  setSelectedTemplateId(restoredProgram.program_template_id ?? "");
+  setProgramDays(restoredDays ?? []);
+  setProgramHistory((prev) =>
+    prev.map((historyProgram) => {
+      if (historyProgram.id === restoredProgram.id) {
+        return restoredProgram as ClientProgram;
+      }
+
+      if (historyProgram.id === clientProgram.id) {
+        return {
+          ...historyProgram,
+          status: "superseded",
+          archived_at: now,
+          superseded_by_program_id: restoredProgram.id,
+        };
+      }
+
+      return historyProgram;
+    })
+  );
+  setRestoringProgramId(null);
+};
 const handleSaveCalorieTarget = async () => {
   if (!client || proposedTarget === null) return;
 
@@ -1752,6 +1902,67 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                       A programme is currently assigned to this client.
                     </p>
                   )}
+
+                  {programHistory.length > 1 && (
+                    <div className="mt-4 rounded-xl border border-border-subtle bg-surface-sunken p-3">
+                      <p className="text-sm font-semibold text-ink">
+                        Programme history
+                      </p>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Restore a previous programme if a reassignment was made by mistake.
+                      </p>
+
+                      <div className="mt-3 space-y-2">
+                        {programHistory.map((program) => {
+                          const templateName =
+                            templates.find(
+                              (template) =>
+                                template.id === program.program_template_id
+                            )?.name ?? "Programme";
+                          const isActive = program.id === clientProgram?.id;
+                          const createdAt = program.created_at
+                            ? new Date(program.created_at).toLocaleDateString(
+                                "en-GB",
+                                {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                }
+                              )
+                            : "Date unknown";
+
+                          return (
+                            <div
+                              key={program.id}
+                              className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div>
+                                <p className="text-sm font-medium text-ink">
+                                  {templateName}
+                                </p>
+                                <p className="text-xs text-ink-muted">
+                                  {createdAt} - {isActive ? "Active" : program.status ?? "Archived"}
+                                </p>
+                              </div>
+
+                              {!isActive && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreProgram(program)}
+                                  disabled={restoringProgramId === program.id}
+                                  className={styles.buttonSecondary}
+                                >
+                                  {restoringProgramId === program.id
+                                    ? "Restoring..."
+                                    : "Restore"}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-end gap-2">
@@ -2207,30 +2418,61 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
               <div className={styles.card}>
                 <h3 className="font-semibold text-ink">Progress Photos</h3>
 
-                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {progressPhotos.length === 0 ? (
-                    <p className="text-ink-muted">No progress photos uploaded yet</p>
-                  ) : (
-                    progressPhotos.map((photo) => (
-                      <div key={photo.id} className={`${styles.card} p-3`}>
-                        <img
-                          src={photo.signed_url ?? photo.image_url}
-                          alt="Progress"
-                          className="h-56 w-full rounded-xl object-cover"
-                        />
-                        <p className="mt-2 text-sm font-medium text-ink">
-                          {photo.log_date}
-                        </p>
-                        {photo.note && (
-                          <p className="mt-1 text-sm text-ink-muted">{photo.note}</p>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
+                {photoWeeks.length === 0 ? (
+                  <p className="mt-4 text-ink-muted">
+                    No progress photos uploaded yet
+                  </p>
+                ) : (
+                  <ProgressPhotoComparison
+                    photoWeeks={photoWeeks}
+                    showAllWeeks={showAllPhotoWeeks}
+                    onShowAllWeeksChange={setShowAllPhotoWeeks}
+                    getPhotoUrl={getPhotoUrl}
+                    onPhotoClick={(photo, label, weekNumber) =>
+                      setEnlargedPhoto({
+                        photo: photo as ProgressPhoto,
+                        label,
+                        weekNumber,
+                      })
+                    }
+                  />
+                )}
               </div>
             </div>
           </section>
+        </div>
+      )}
+
+      {enlargedPhoto && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4">
+          <div className="relative flex max-h-full w-full max-w-5xl flex-col gap-3">
+            <div className="flex items-center justify-between gap-3 text-white">
+              <div>
+                <p className="text-sm font-semibold">
+                  Week {enlargedPhoto.weekNumber} - {enlargedPhoto.label}
+                </p>
+                <p className="text-xs text-white/70">
+                  {enlargedPhoto.photo.log_date}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnlargedPhoto(null)}
+                className="rounded-full bg-white/15 p-2 text-white transition hover:bg-white/25"
+                aria-label="Close enlarged photo"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="min-h-0 overflow-hidden rounded-xl bg-black">
+              <img
+                src={getPhotoUrl(enlargedPhoto.photo)}
+                alt={`${enlargedPhoto.label} progress photo from ${enlargedPhoto.photo.log_date}`}
+                className="max-h-[82vh] w-full object-contain"
+              />
+            </div>
+          </div>
         </div>
       )}
     </>

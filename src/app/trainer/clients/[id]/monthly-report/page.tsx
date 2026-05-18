@@ -29,6 +29,7 @@ type Client = {
   id: string;
   full_name: string;
   email: string;
+  created_at: string;
   calorie_target: number | null;
   daily_step_target: number | null;
   training_days_per_week: number | null;
@@ -100,21 +101,6 @@ type WeeklyCheckIn = {
 
 const toDateStr = (date: Date) => date.toISOString().split("T")[0];
 
-const getMonthStart = (month: string) => `${month}-01`;
-
-const getMonthEnd = (month: string) => {
-  const [year, monthIndex] = month.split("-").map(Number);
-  return toDateStr(new Date(year, monthIndex, 0));
-};
-
-const getMonthLabel = (month: string) => {
-  const [year, monthIndex] = month.split("-").map(Number);
-  return new Date(year, monthIndex - 1, 1).toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-  });
-};
-
 const getDaysBetween = (start: string, end: string) => {
   const result: string[] = [];
   let current = start;
@@ -140,31 +126,37 @@ const formatDelta = (value: number, unit: string) => {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}${unit}`;
 };
 
+const formatValue = (value: number | null | undefined, unit: string) =>
+  typeof value === "number" ? `${value}${unit}` : "-";
+
 export default function MonthlyClientReportPage({ params }: PageProps) {
   const [clientId, setClientId] = useState("");
   const [client, setClient] = useState<Client | null>(null);
   const [weights, setWeights] = useState<WeightLog[]>([]);
+  const [comparisonWeights, setComparisonWeights] = useState<WeightLog[]>([]);
   const [measurements, setMeasurements] = useState<MeasurementLog[]>([]);
+  const [comparisonMeasurements, setComparisonMeasurements] = useState<
+    MeasurementLog[]
+  >([]);
   const [workouts, setWorkouts] = useState<WorkoutCompletion[]>([]);
   const [dailyTracking, setDailyTracking] = useState<DailyTracking[]>([]);
   const [mealLogs, setMealLogs] = useState<MealLog[]>([]);
   const [customMealLogs, setCustomMealLogs] = useState<CustomMealLog[]>([]);
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
+  const [comparisonPhotos, setComparisonPhotos] = useState<ProgressPhoto[]>([]);
   const [checkIns, setCheckIns] = useState<WeeklyCheckIn[]>([]);
-  const [month, setMonth] = useState(() => todayStr().slice(0, 7));
+  const [reportStart, setReportStart] = useState(() => addDays(todayStr(), -27));
+  const [reportEnd, setReportEnd] = useState(() => todayStr());
   const [goals, setGoals] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const monthStart = useMemo(() => getMonthStart(month), [month]);
-  const monthEnd = useMemo(() => {
-    const end = getMonthEnd(month);
-    const today = todayStr();
-    return month === today.slice(0, 7) && today < end ? today : end;
-  }, [month]);
-  const monthLabel = useMemo(() => getMonthLabel(month), [month]);
-  const monthDays = useMemo(
-    () => getDaysBetween(monthStart, monthEnd),
-    [monthStart, monthEnd]
+  const reportDays = useMemo(
+    () => getDaysBetween(reportStart, reportEnd),
+    [reportStart, reportEnd]
+  );
+  const reportLabel = useMemo(
+    () => `${formatLongDate(reportStart)} to ${formatLongDate(reportEnd)}`,
+    [reportStart, reportEnd]
   );
 
   useEffect(() => {
@@ -192,11 +184,14 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
         customMealRes,
         photoRes,
         checkInRes,
+        comparisonWeightRes,
+        comparisonMeasurementRes,
+        comparisonPhotoRes,
       ] = await Promise.all([
         supabase
           .from("clients")
           .select(
-            "id, full_name, email, calorie_target, daily_step_target, training_days_per_week"
+            "id, full_name, email, created_at, calorie_target, daily_step_target, training_days_per_week"
           )
           .eq("id", clientId)
           .maybeSingle(),
@@ -204,49 +199,49 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
           .from("client_weight_logs")
           .select("id, weight_kg, log_date")
           .eq("client_id", clientId)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd)
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd)
           .order("log_date", { ascending: true }),
         supabase
           .from("client_measurement_logs")
           .select("id, log_date, waist_cm, hips_cm, chest_cm")
           .eq("client_id", clientId)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd)
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd)
           .order("log_date", { ascending: true }),
         supabase
           .from("client_workout_completions")
           .select("id, completed_date")
           .eq("client_id", clientId)
-          .gte("completed_date", monthStart)
-          .lte("completed_date", monthEnd)
+          .gte("completed_date", reportStart)
+          .lte("completed_date", reportEnd)
           .order("completed_date", { ascending: true }),
         supabase
           .from("daily_tracking")
           .select("log_date, steps_logged, water_completed")
           .eq("client_id", clientId)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd)
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd)
           .order("log_date", { ascending: true }),
         supabase
           .from("meal_logs")
           .select("log_date, quantity, recipes(calories)")
           .eq("client_id", clientId)
           .eq("completed", true)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd),
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd),
         supabase
           .from("custom_meal_logs")
           .select("log_date, calories")
           .eq("client_id", clientId)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd),
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd),
         supabase
           .from("progress_photos")
           .select("id, image_url, storage_path, log_date, note, photo_type")
           .eq("client_id", clientId)
-          .gte("log_date", monthStart)
-          .lte("log_date", monthEnd)
+          .gte("log_date", reportStart)
+          .lte("log_date", reportEnd)
           .order("log_date", { ascending: true }),
         supabase
           .from("client_weekly_check_ins")
@@ -254,14 +249,36 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
             "week_start, weight_kg, energy_level, hunger_level, motivation_level, soreness_level, sleep_quality, notes"
           )
           .eq("client_id", clientId)
-          .gte("week_start", monthStart)
-          .lte("week_start", monthEnd)
+          .gte("week_start", reportStart)
+          .lte("week_start", reportEnd)
           .order("week_start", { ascending: true }),
+        supabase
+          .from("client_weight_logs")
+          .select("id, weight_kg, log_date")
+          .eq("client_id", clientId)
+          .lte("log_date", reportEnd)
+          .order("log_date", { ascending: true }),
+        supabase
+          .from("client_measurement_logs")
+          .select("id, log_date, waist_cm, hips_cm, chest_cm")
+          .eq("client_id", clientId)
+          .lte("log_date", reportEnd)
+          .order("log_date", { ascending: true }),
+        supabase
+          .from("progress_photos")
+          .select("id, image_url, storage_path, log_date, note, photo_type")
+          .eq("client_id", clientId)
+          .lte("log_date", reportEnd)
+          .order("log_date", { ascending: true }),
       ]);
 
       setClient((clientRes.data ?? null) as Client | null);
       setWeights((weightRes.data ?? []) as WeightLog[]);
+      setComparisonWeights((comparisonWeightRes.data ?? []) as WeightLog[]);
       setMeasurements((measurementRes.data ?? []) as MeasurementLog[]);
+      setComparisonMeasurements(
+        (comparisonMeasurementRes.data ?? []) as MeasurementLog[]
+      );
       setWorkouts((workoutRes.data ?? []) as WorkoutCompletion[]);
       setDailyTracking((trackingRes.data ?? []) as DailyTracking[]);
       setMealLogs((mealRes.data ?? []) as MealLog[]);
@@ -271,12 +288,17 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
           (photoRes.data ?? []) as ProgressPhoto[]
         )
       );
+      setComparisonPhotos(
+        await withSignedProgressPhotoUrls(
+          (comparisonPhotoRes.data ?? []) as ProgressPhoto[]
+        )
+      );
       setCheckIns((checkInRes.data ?? []) as WeeklyCheckIn[]);
       setLoading(false);
     };
 
     loadReport();
-  }, [clientId, monthStart, monthEnd]);
+  }, [clientId, reportStart, reportEnd]);
 
   const caloriesByDate = useMemo(() => {
     const totals = new Map<string, number>();
@@ -300,17 +322,23 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
     (value) => value > 0
   ).length;
   const calorieTarget = client?.calorie_target ?? null;
-  const expectedCalories = calorieTarget ? calorieTarget * monthDays.length : null;
+  const expectedCalories = calorieTarget ? calorieTarget * reportDays.length : null;
   const calorieDifference =
     expectedCalories !== null ? Math.round(totalCalories - expectedCalories) : null;
   const averageDailyDifference =
     calorieDifference !== null
-      ? Math.round(calorieDifference / monthDays.length)
+      ? Math.round(calorieDifference / reportDays.length)
       : null;
 
   const weightDelta =
     weights.length >= 2
       ? Number(weights[weights.length - 1].weight_kg) - Number(weights[0].weight_kg)
+      : null;
+  const baselineWeight = comparisonWeights[0] ?? null;
+  const currentWeight = comparisonWeights.at(-1) ?? null;
+  const comparisonWeightDelta =
+    baselineWeight && currentWeight
+      ? Number(currentWeight.weight_kg) - Number(baselineWeight.weight_kg)
       : null;
   const waistLogs = measurements.filter((log) => log.waist_cm !== null);
   const waistDelta =
@@ -318,9 +346,20 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
       ? Number(waistLogs[waistLogs.length - 1].waist_cm) -
         Number(waistLogs[0].waist_cm)
       : null;
+  const baselineMeasurements = comparisonMeasurements[0] ?? null;
+  const currentMeasurements = comparisonMeasurements.at(-1) ?? null;
+  const comparisonMeasurementDelta = (
+    key: keyof Pick<MeasurementLog, "waist_cm" | "hips_cm" | "chest_cm">
+  ) => {
+    const baseline = baselineMeasurements?.[key];
+    const current = currentMeasurements?.[key];
+
+    if (typeof baseline !== "number" || typeof current !== "number") return null;
+    return current - baseline;
+  };
 
   const expectedWorkouts = client?.training_days_per_week
-    ? Math.max(1, Math.round((monthDays.length / 7) * client.training_days_per_week))
+    ? Math.max(1, Math.round((reportDays.length / 7) * client.training_days_per_week))
     : null;
   const workoutProgress =
     expectedWorkouts !== null
@@ -339,7 +378,7 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
       : null;
   const waterDays = dailyTracking.filter((day) => day.water_completed).length;
 
-  const dailyChartData = monthDays.map((date) => ({
+  const dailyChartData = reportDays.map((date) => ({
     date: date.slice(5),
     calories: Math.round(caloriesByDate.get(date) ?? 0),
     steps: trackingByDate.get(date)?.steps_logged ?? 0,
@@ -354,6 +393,14 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
     latestPhotosByType.set(photo.photo_type, photo);
   });
   const photoTypes = ["front", "side", "back"] as const;
+  const baselineComparisonPhotosByType = new Map<string, ProgressPhoto>();
+  const currentComparisonPhotosByType = new Map<string, ProgressPhoto>();
+  comparisonPhotos.forEach((photo) => {
+    if (!baselineComparisonPhotosByType.has(photo.photo_type)) {
+      baselineComparisonPhotosByType.set(photo.photo_type, photo);
+    }
+    currentComparisonPhotosByType.set(photo.photo_type, photo);
+  });
 
   const checkInAverage = (key: keyof WeeklyCheckIn) => {
     const values = checkIns
@@ -362,6 +409,18 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
 
     if (values.length === 0) return "-";
     return (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1);
+  };
+
+  const setPresetRange = (days: number) => {
+    const end = todayStr();
+    setReportStart(addDays(end, -(days - 1)));
+    setReportEnd(end);
+  };
+
+  const setAllTimeRange = () => {
+    const start = client?.created_at?.split("T")[0] ?? reportStart;
+    setReportStart(start);
+    setReportEnd(todayStr());
   };
 
   return (
@@ -374,13 +433,56 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
           Back to client
         </Link>
 
-        <div className="flex flex-wrap gap-2">
-          <input
-            type="month"
-            value={month}
-            onChange={(event) => setMonth(event.target.value)}
-            className={styles.input}
-          />
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-sm font-medium text-ink">
+            From
+            <input
+              type="date"
+              value={reportStart}
+              max={reportEnd}
+              onChange={(event) => setReportStart(event.target.value)}
+              className={styles.input}
+            />
+          </label>
+          <label className="text-sm font-medium text-ink">
+            To
+            <input
+              type="date"
+              value={reportEnd}
+              min={reportStart}
+              max={todayStr()}
+              onChange={(event) => setReportEnd(event.target.value)}
+              className={styles.input}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setPresetRange(7)}
+            className={styles.buttonSecondary}
+          >
+            Last 7 days
+          </button>
+          <button
+            type="button"
+            onClick={() => setPresetRange(14)}
+            className={styles.buttonSecondary}
+          >
+            Last 14 days
+          </button>
+          <button
+            type="button"
+            onClick={() => setPresetRange(28)}
+            className={styles.buttonSecondary}
+          >
+            Last 28 days
+          </button>
+          <button
+            type="button"
+            onClick={setAllTimeRange}
+            className={styles.buttonSecondary}
+          >
+            All time
+          </button>
           <button
             type="button"
             onClick={() => window.print()}
@@ -396,13 +498,13 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
         <div className="flex flex-col gap-4 border-b border-border-subtle pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-gold">
-              Monthly Progress Report
+              Progress Report
             </p>
             <h1 className="mt-1 text-3xl font-bold text-ink">
               {client?.full_name ?? "Client"}
             </h1>
             <p className="mt-1 text-sm text-ink-muted">
-              {monthLabel} · {formatLongDate(monthStart)} to {formatLongDate(monthEnd)}
+              {reportLabel}
             </p>
           </div>
           <div className="text-left text-sm text-ink-muted sm:text-right">
@@ -429,7 +531,7 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
                 <p className="mt-1 text-sm text-ink-muted">
                   {workoutProgress !== null
                     ? `${workoutProgress}% of expected`
-                    : "Completed this month"}
+                    : "Completed in this range"}
                 </p>
               </div>
               <div className="rounded-lg border border-border-subtle p-4">
@@ -448,7 +550,7 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
                   Nutrition
                 </p>
                 <p className="mt-2 text-2xl font-bold text-ink">
-                  {loggedNutritionDays}/{monthDays.length}
+                  {loggedNutritionDays}/{reportDays.length}
                 </p>
                 <p className="mt-1 text-sm text-ink-muted">days logged</p>
               </div>
@@ -462,6 +564,86 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
                 <p className="mt-1 text-sm text-ink-muted">average per logged day</p>
               </div>
             </div>
+
+            <section>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-ink">
+                    Day 1 vs Current
+                  </h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Earliest available baseline compared with the latest data up
+                    to {formatLongDate(reportEnd)}.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-border-subtle p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                    Weight
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-ink">
+                    {comparisonWeightDelta !== null
+                      ? formatDelta(comparisonWeightDelta, "kg")
+                      : "-"}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {baselineWeight
+                      ? `${baselineWeight.weight_kg}kg on ${baselineWeight.log_date}`
+                      : "No baseline"}
+                    {currentWeight
+                      ? ` → ${currentWeight.weight_kg}kg on ${currentWeight.log_date}`
+                      : ""}
+                  </p>
+                </div>
+              </div>
+
+              {comparisonPhotos.length > 0 && (
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  {photoTypes.map((type) => {
+                    const baselinePhoto = baselineComparisonPhotosByType.get(type);
+                    const currentPhoto = currentComparisonPhotosByType.get(type);
+
+                    return (
+                      <div
+                        key={`comparison-${type}`}
+                        className="rounded-lg border border-border-subtle p-3"
+                      >
+                        <p className="text-sm font-semibold capitalize text-ink">
+                          {type} photos
+                        </p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {[baselinePhoto, currentPhoto].map((photo, index) => (
+                            <div key={`${type}-comparison-${index}`}>
+                              <p className="mb-1 text-xs text-ink-muted">
+                                {index === 0 ? "Day 1" : "Current"}
+                              </p>
+                              {photo?.signed_url ? (
+                                <img
+                                  src={photo.signed_url}
+                                  alt={`${type} ${index === 0 ? "day 1" : "current"}`}
+                                  className="aspect-[3/4] w-full rounded-md object-cover"
+                                />
+                              ) : (
+                                <div className="flex aspect-[3/4] items-center justify-center rounded-md bg-surface-sunken text-xs text-ink-muted">
+                                  No photo
+                                </div>
+                              )}
+                              {photo && (
+                                <p className="mt-1 text-xs text-ink-muted">
+                                  {photo.log_date}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
             <div className="grid gap-6 lg:grid-cols-2">
               <section>
@@ -654,8 +836,56 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
 
             <section>
               <h2 className="text-xl font-semibold text-ink">
-                Next Month&apos;s Goals
+                Optional Measurements
               </h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                Day 1 comparison for optional body measurements.
+              </p>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                {[
+                  ["Waist", "waist_cm"],
+                  ["Hips", "hips_cm"],
+                  ["Chest", "chest_cm"],
+                ].map(([label, key]) => {
+                  const typedKey = key as keyof Pick<
+                    MeasurementLog,
+                    "waist_cm" | "hips_cm" | "chest_cm"
+                  >;
+                  const delta = comparisonMeasurementDelta(typedKey);
+
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-lg border border-border-subtle p-4"
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                        {label}
+                      </p>
+                      <p className="mt-2 text-2xl font-bold text-ink">
+                        {delta !== null ? formatDelta(delta, "cm") : "-"}
+                      </p>
+                      <p className="mt-1 text-sm text-ink-muted">
+                        {baselineMeasurements
+                          ? `${formatValue(
+                              baselineMeasurements[typedKey],
+                              "cm"
+                            )} on ${baselineMeasurements.log_date}`
+                          : "No baseline"}
+                        {currentMeasurements
+                          ? ` → ${formatValue(
+                              currentMeasurements[typedKey],
+                              "cm"
+                            )} on ${currentMeasurements.log_date}`
+                          : ""}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section>
+                <h2 className="text-xl font-semibold text-ink">Next Focus</h2>
               <textarea
                 value={goals}
                 onChange={(event) => setGoals(event.target.value)}

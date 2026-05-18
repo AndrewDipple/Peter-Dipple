@@ -14,7 +14,9 @@ type Client = {
   calorie_target: number | null;
   daily_step_target: number;
   profile_id: string | null;
+  last_seen_at: string | null;
   last_sign_in_at: string | null;
+  last_active_at: string | null;
 };
 
 type WorkoutSetLog = {
@@ -127,28 +129,28 @@ export default function TrainerDashboardPage() {
       year: "numeric",
     });
   }, [selectedDate]);
-  const getDaysSinceLogin = (lastSignIn: string | null) => {
-    if (!lastSignIn) return null;
+  const getDaysSinceActivity = (lastActive: string | null) => {
+    if (!lastActive) return null;
 
     const now = new Date();
-    const lastLogin = new Date(lastSignIn);
-    const diffMs = now.getTime() - lastLogin.getTime();
+    const lastActivity = new Date(lastActive);
+    const diffMs = now.getTime() - lastActivity.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
     return diffDays;
   };
 
-  const getLastActiveText = (lastSignIn: string | null) => {
-    const days = getDaysSinceLogin(lastSignIn);
+  const getLastActiveText = (lastActive: string | null) => {
+    const days = getDaysSinceActivity(lastActive);
 
-    if (days === null) return "Never logged in";
+    if (days === null) return "No activity recorded";
     if (days === 0) return "Active today";
     if (days === 1) return "1 day ago";
     return `${days} days ago`;
   };
 
-  const getLastActiveColor = (lastSignIn: string | null) => {
-    const days = getDaysSinceLogin(lastSignIn);
+  const getLastActiveColor = (lastActive: string | null) => {
+    const days = getDaysSinceActivity(lastActive);
 
     if (days === null) return "text-red-600";
     if (days === 0) return "text-green-600";
@@ -190,14 +192,14 @@ export default function TrainerDashboardPage() {
     });
 
     clientCards.forEach((card) => {
-      const daysSinceLogin = getDaysSinceLogin(card.client.last_sign_in_at);
-      if (daysSinceLogin !== null && daysSinceLogin > 7) {
+      const daysSinceActivity = getDaysSinceActivity(card.client.last_active_at);
+      if (daysSinceActivity !== null && daysSinceActivity > 7) {
         items.push({
           key: `inactive-${card.client.id}`,
           clientId: card.client.id,
           clientName: card.client.full_name,
           title: "Inactive over a week",
-          detail: `Last active ${daysSinceLogin} days ago`,
+          detail: `Last active ${daysSinceActivity} days ago`,
           tone: "red",
         });
       }
@@ -226,10 +228,27 @@ export default function TrainerDashboardPage() {
 
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
-        .select("id, full_name, email, calorie_target, daily_step_target, profile_id")
+        .select(
+          "id, full_name, email, calorie_target, daily_step_target, profile_id, last_seen_at, profiles(last_sign_in_at)"
+        )
         .order("full_name", { ascending: true });
 
-      if (clientsError || !clientsData) {
+      let clientRows: any[] | null = clientsData;
+      let clientError = clientsError;
+
+      if (clientsError?.code === "42703") {
+        const fallback = await supabase
+          .from("clients")
+          .select(
+            "id, full_name, email, calorie_target, daily_step_target, profile_id, profiles(last_sign_in_at)"
+          )
+          .order("full_name", { ascending: true });
+
+        clientRows = fallback.data;
+        clientError = fallback.error;
+      }
+
+      if (clientError || !clientRows) {
         setClientCards([]);
         setLoading(false);
         return;
@@ -247,28 +266,25 @@ export default function TrainerDashboardPage() {
         );
       }
 
-      // Get auth data for all clients
-      const clientsWithAuth = await Promise.all(
-        clientsData.map(async (client) => {
-          if (!client.profile_id) {
-            return { ...client, last_sign_in_at: null };
-          }
+      const clients = (clientRows ?? []).map((client: any) => {
+        const profile = Array.isArray(client.profiles)
+          ? client.profiles[0]
+          : client.profiles;
+        const lastSignIn = profile?.last_sign_in_at ?? null;
+        const lastSeen = client.last_seen_at ?? null;
 
-          // Get last sign in from auth.users via profiles
-          const { data: authData } = await supabase
-            .from("profiles")
-            .select("last_sign_in_at")
-            .eq("id", client.profile_id)
-            .single();
-
-          return {
-            ...client,
-            last_sign_in_at: authData?.last_sign_in_at || null,
-          };
-        })
-      );
-
-      const clients = clientsWithAuth as Client[];
+        return {
+          id: client.id,
+          full_name: client.full_name,
+          email: client.email,
+          calorie_target: client.calorie_target,
+          daily_step_target: client.daily_step_target,
+          profile_id: client.profile_id,
+          last_seen_at: lastSeen,
+          last_sign_in_at: lastSignIn,
+          last_active_at: lastSeen ?? lastSignIn,
+        };
+      }) as Client[];
       const clientIds = clients.map((client) => client.id);
       const clientNameMap = new Map(
         clients.map((client) => [client.id, client.full_name])
@@ -788,8 +804,8 @@ export default function TrainerDashboardPage() {
                     <p className="mt-1 text-sm text-ink-muted">
                       {card.client.email}
                     </p>
-                    <p className={`mt-1 text-xs font-medium ${getLastActiveColor(card.client.last_sign_in_at)}`}>
-                      Last active: {getLastActiveText(card.client.last_sign_in_at)}
+                    <p className={`mt-1 text-xs font-medium ${getLastActiveColor(card.client.last_active_at)}`}>
+                      Last active: {getLastActiveText(card.client.last_active_at)}
                     </p>
                   </div>
 

@@ -370,14 +370,14 @@ export default function AppShell({ userType, children }: Props) {
         className="sticky top-0 z-50 text-white shadow-md dark:text-ink"
         style={{ backgroundColor: theme === "dark" ? "#D4AF37" : "#111111" }}
       >
-        <div className="mx-auto flex h-18 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
+        <div className="mx-auto flex h-18 max-w-6xl items-center justify-between gap-3 px-4 md:px-6">
           <Link href={dashboardHref} className="flex h-full shrink-0 items-center">
             <div className="flex h-16 w-16 items-center">
               <Logo />
             </div>
           </Link>
 
-          <nav className="flex flex-1 items-center justify-center gap-1 md:gap-6">
+          <nav className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:gap-3">
             {navItems.map((item) => {
               const active = isActive(item);
               const Icon = item.icon;
@@ -386,7 +386,8 @@ export default function AppShell({ userType, children }: Props) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative flex items-center gap-2 px-2 py-2 text-sm font-medium transition-colors ${
+                  title={item.label}
+                  className={`relative flex shrink-0 items-center gap-2 px-2 py-2 text-sm font-medium transition-colors lg:px-3 ${
                     active
                       ? theme === "dark"
                         ? "text-navy"
@@ -396,8 +397,8 @@ export default function AppShell({ userType, children }: Props) {
                       : "text-white/70 hover:text-white"
                   }`}
                 >
-                  <Icon size={20} className="md:hidden" />
-                  <span className="hidden md:inline">{item.label}</span>
+                  <Icon size={20} className="lg:hidden" />
+                  <span className="hidden lg:inline">{item.label}</span>
                   {!isStaff(userType) &&
                     item.href === "/client/stats" &&
                     hasStatsPhotoReminder && (

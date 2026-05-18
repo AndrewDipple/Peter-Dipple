@@ -49,6 +49,11 @@ type RemovedExercise = {
   exercise: ProgramTemplateExercise;
 };
 
+type RemovedDay = {
+  day: ProgramTemplateDay;
+  exercises: ProgramTemplateExercise[];
+};
+
 const workoutLocationOptions = [
   { value: "gym", label: "Gym" },
   { value: "home_weights", label: "Home weights" },
@@ -107,6 +112,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   >({});
   const [removedExercise, setRemovedExercise] =
     useState<RemovedExercise | null>(null);
+  const [removedDay, setRemovedDay] = useState<RemovedDay | null>(null);
 
   const sortedDays = useMemo(() => {
     return [...days].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
@@ -360,7 +366,14 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   };
 
   const handleRemoveDay = async (dayId: string) => {
-    const confirmed = window.confirm("Delete this day and its exercises?");
+    const dayToRemove = days.find((day) => day.id === dayId);
+    if (!dayToRemove) return;
+
+    const exercisesToRemove = exercisesByDay[dayId] ?? [];
+
+    const confirmed = window.confirm(
+      `Remove ${dayToRemove.day_name ?? "this day"} and ${exercisesToRemove.length} exercise${exercisesToRemove.length === 1 ? "" : "s"} from this template? You can undo this immediately if it was a mistake.`
+    );
     if (!confirmed) return;
 
     const { error } = await supabase
@@ -373,6 +386,8 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
       return;
     }
 
+    setRemovedDay({ day: dayToRemove, exercises: exercisesToRemove });
+    setRemovedExercise(null);
     setDays((prev) => prev.filter((day) => day.id !== dayId));
     setExercisesByDay((prev) => {
       const next = { ...prev };
@@ -636,6 +651,71 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     });
   };
 
+  const handleUndoRemoveDay = async () => {
+    if (!removedDay) return;
+
+    const { data: restoredDay, error: dayError } = await supabase
+      .from("program_template_days")
+      .insert({
+        id: removedDay.day.id,
+        program_template_id: removedDay.day.program_template_id,
+        day_name: removedDay.day.day_name,
+        sort_order: removedDay.day.sort_order,
+      })
+      .select()
+      .single();
+
+    if (dayError || !restoredDay) {
+      alert("Could not restore day");
+      return;
+    }
+
+    if (removedDay.exercises.length > 0) {
+      const { data: restoredExercises, error: exerciseError } = await supabase
+        .from("program_template_exercises")
+        .insert(
+          removedDay.exercises.map((exercise) => ({
+            id: exercise.id,
+            program_template_day_id: exercise.program_template_day_id,
+            exercise_name: exercise.exercise_name,
+            sets: exercise.sets,
+            reps: exercise.reps,
+            target_weight_kg: exercise.target_weight_kg,
+            sort_order: exercise.sort_order,
+          }))
+        )
+        .select();
+
+      if (exerciseError) {
+        alert("Day was restored, but its exercises could not be restored");
+        setDays((prev) =>
+          [...prev, restoredDay as ProgramTemplateDay].sort(
+            (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+          )
+        );
+        setExercisesByDay((prev) => ({ ...prev, [restoredDay.id]: [] }));
+        setRemovedDay(null);
+        return;
+      }
+
+      setExercisesByDay((prev) => ({
+        ...prev,
+        [restoredDay.id]: sortExercises(
+          (restoredExercises ?? []) as ProgramTemplateExercise[]
+        ),
+      }));
+    } else {
+      setExercisesByDay((prev) => ({ ...prev, [restoredDay.id]: [] }));
+    }
+
+    setDays((prev) =>
+      [...prev, restoredDay as ProgramTemplateDay].sort(
+        (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      )
+    );
+    setRemovedDay(null);
+  };
+
   const handleSaveExerciseEdit = async (
     exercise: ProgramTemplateExercise,
     dayId: string
@@ -695,6 +775,32 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
             <button
               type="button"
               onClick={() => setRemovedExercise(null)}
+              className={styles.buttonSecondary}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {removedDay && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-gold bg-gold/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-ink">
+            Removed {removedDay.day.day_name ?? "day"} and{" "}
+            {removedDay.exercises.length} exercise
+            {removedDay.exercises.length === 1 ? "" : "s"}.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleUndoRemoveDay}
+              className={styles.buttonPrimary}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              onClick={() => setRemovedDay(null)}
               className={styles.buttonSecondary}
             >
               Dismiss

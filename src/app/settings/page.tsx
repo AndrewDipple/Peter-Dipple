@@ -5,9 +5,15 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Moon, Sun, User, Mail, Upload, ArrowLeft, Power } from "lucide-react";
+import { Moon, Sun, User, Mail, Upload, ArrowLeft, Power, Bell } from "lucide-react";
 import { Role, isStaff } from "@/lib/roles";
 import { MARKETING_CONSENT_VERSION } from "@/lib/legal";
+import {
+  disablePushNotifications,
+  enablePushNotifications,
+  getPushStatus,
+  type PushStatus,
+} from "@/lib/pushNotifications";
 
 import {
   getActiveCompanionView,
@@ -49,6 +55,9 @@ export default function SettingsPage() {
   const [marketingConsentAt, setMarketingConsentAt] = useState<string | null>(null);
   const [marketingConsentVersion, setMarketingConsentVersion] = useState<string | null>(null);
   const [savingMarketingConsent, setSavingMarketingConsent] = useState(false);
+  const [pushStatus, setPushStatus] = useState<PushStatus>("unsupported");
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [updatingPush, setUpdatingPush] = useState(false);
 
     const [availablePaths, setAvailablePaths] = useState<CompanionPath[]>([]);
 
@@ -160,9 +169,15 @@ export default function SettingsPage() {
      setLoading(false);
    }, [router]);
  
-   useEffect(() => {
-     loadPage();
-   }, [loadPage]); 
+  useEffect(() => {
+    loadPage();
+  }, [loadPage]); 
+
+  useEffect(() => {
+    getPushStatus()
+      .then(setPushStatus)
+      .catch(() => setPushStatus("unsupported"));
+  }, []);
 
 
   const flashMessage = (type: "success" | "error", text: string) => {
@@ -235,6 +250,24 @@ export default function SettingsPage() {
       enabled ? "Marketing consent enabled" : "Marketing consent withdrawn"
     );
     setSavingMarketingConsent(false);
+  };
+
+  const handleEnablePush = async () => {
+    setUpdatingPush(true);
+    setPushMessage(null);
+    const result = await enablePushNotifications();
+    setPushStatus(result.status);
+    setPushMessage(result.message);
+    setUpdatingPush(false);
+  };
+
+  const handleDisablePush = async () => {
+    setUpdatingPush(true);
+    setPushMessage(null);
+    const result = await disablePushNotifications();
+    setPushStatus(result.status);
+    setPushMessage(result.message);
+    setUpdatingPush(false);
   };
 
 
@@ -370,6 +403,70 @@ export default function SettingsPage() {
             </p>
           </div>
         )}
+
+        <div className={styles.card}>
+          <h2 className={styles.h2}>Push notifications</h2>
+          <p className="mt-2 text-sm text-ink-muted">
+            Allow this device to receive app notifications. We will start with
+            message alerts once server delivery is connected.
+          </p>
+
+          <div className="mt-4 rounded-md border border-border-subtle bg-surface-sunken p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <Bell size={18} className="mt-1 text-gold" />
+                <div>
+                  <p className="text-sm font-semibold text-ink">
+                    This device is{" "}
+                    {pushStatus === "enabled"
+                      ? "enabled"
+                      : pushStatus === "blocked"
+                      ? "blocked"
+                      : "not enabled"}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {pushStatus === "missing_key"
+                      ? "A VAPID public key is needed before push can be enabled."
+                      : pushStatus === "unsupported"
+                      ? "This browser does not support web push notifications."
+                      : pushStatus === "blocked"
+                      ? "Notifications are blocked in browser settings."
+                      : "Push is controlled per device/browser."}
+                  </p>
+                </div>
+              </div>
+
+              {pushStatus === "enabled" ? (
+                <button
+                  type="button"
+                  onClick={handleDisablePush}
+                  disabled={updatingPush}
+                  className={styles.buttonSecondary}
+                >
+                  {updatingPush ? "Updating..." : "Turn off"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEnablePush}
+                  disabled={
+                    updatingPush ||
+                    pushStatus === "unsupported" ||
+                    pushStatus === "missing_key" ||
+                    pushStatus === "blocked"
+                  }
+                  className={`${styles.buttonPrimary} disabled:opacity-50`}
+                >
+                  {updatingPush ? "Enabling..." : "Enable on this device"}
+                </button>
+              )}
+            </div>
+
+            {pushMessage && (
+              <p className="mt-3 text-sm font-medium text-ink">{pushMessage}</p>
+            )}
+          </div>
+        </div>
 
           <div className={styles.card}>
             <h3 className="font-semibold text-ink">Companion settings</h3>

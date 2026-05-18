@@ -26,8 +26,8 @@
   --color-gold: #D4AF37;             /* rare brand accent */
   --color-emerald: #1F6F5E;          /* success / wellbeing */
   --color-navy: #1C2A44;             /* depth, structural blocks */
-  --color-workout: #FF6B6B;          /* workout section color */
-  --color-nutrition: #4ECDC4;        /* nutrition section color */
+  --color-workout: #1C2A44;          /* workout section alias: navy */
+  --color-nutrition: #1F6F5E;        /* nutrition section alias: emerald */
 
   /* -- Status Colors ------------------------------------------------------ */
   --color-success: #1F6F5E;

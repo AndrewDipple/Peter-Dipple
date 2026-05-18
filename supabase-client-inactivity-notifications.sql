@@ -4,6 +4,19 @@
 alter table public.notifications
   drop constraint if exists notifications_type_check;
 
+alter table public.clients
+  add column if not exists last_seen_at timestamptz;
+
+create index if not exists clients_last_seen_at_idx
+  on public.clients (last_seen_at desc);
+
+update public.clients c
+set last_seen_at = p.last_sign_in_at
+from public.profiles p
+where c.profile_id = p.id
+  and c.last_seen_at is null
+  and p.last_sign_in_at is not null;
+
 alter table public.notifications
   add constraint notifications_type_check
   check (
@@ -43,25 +56,27 @@ begin
       c.id,
       c.full_name,
       c.created_at,
+      c.last_seen_at,
       p.last_sign_in_at,
+      coalesce(c.last_seen_at, p.last_sign_in_at, c.created_at) as last_activity_at,
       greatest(
         p_days_threshold,
         floor(
           extract(
             epoch from (
-              now() - coalesce(p.last_sign_in_at, c.created_at)
+              now() - coalesce(c.last_seen_at, p.last_sign_in_at, c.created_at)
             )
           ) / 86400
         )::integer
       ) as days_inactive
     from public.clients c
     left join public.profiles p on p.id = c.profile_id
-    where coalesce(p.last_sign_in_at, c.created_at) <=
+    where coalesce(c.last_seen_at, p.last_sign_in_at, c.created_at) <=
       now() - make_interval(days => p_days_threshold)
   loop
     notification_link := '/trainer/clients/' || inactive_client.id::text;
     notification_message :=
-      inactive_client.full_name || ' has not logged in for ' ||
+      inactive_client.full_name || ' has not opened the app for ' ||
       inactive_client.days_inactive::text || ' days';
 
     for staff_profile in
@@ -103,3 +118,19 @@ $$;
 
 revoke all on function public.notify_staff_client_inactivity(integer) from public;
 grant execute on function public.notify_staff_client_inactivity(integer) to authenticated;
+
+create or replace function public.touch_client_last_seen()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.clients
+  set last_seen_at = now()
+  where profile_id = auth.uid();
+end;
+$$;
+
+revoke all on function public.touch_client_last_seen() from public;
+grant execute on function public.touch_client_last_seen() to authenticated;

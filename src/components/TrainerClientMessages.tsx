@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { notifyClientMessagePush } from "@/lib/clientPush";
 
 type ClientMessage = {
   id: string;
@@ -121,6 +122,7 @@ export default function TrainerClientMessages({
 
     setMessages((prev) => [data, ...prev]);
     setReplyDrafts((prev) => ({ ...prev, [message.id]: "" }));
+    notifyClientMessagePush(data.id);
     setSendingReplyId(null);
   };
 

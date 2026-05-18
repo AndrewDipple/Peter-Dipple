@@ -155,6 +155,7 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
         .from("client_programs")
         .select("id")
         .eq("client_id", clientId)
+        .or("status.eq.active,status.is.null")
         .order("created_at", { ascending: false })
         .limit(1);
 

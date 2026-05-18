@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
+import { notifyClientMessagePush } from "@/lib/clientPush";
 
 type ClientMessage = {
   id: string;
@@ -100,6 +101,7 @@ export default function ClientMessages({ clientId }: ClientMessagesProps) {
 
     setMessages((prev) => [data as ClientMessage, ...prev]);
     setBody("");
+    notifyClientMessagePush(data.id);
     setSending(false);
   };
 
