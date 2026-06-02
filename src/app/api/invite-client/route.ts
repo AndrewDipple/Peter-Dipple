@@ -16,7 +16,7 @@ const getAppOrigin = (request: NextRequest) => {
 
 export async function POST(request: NextRequest) {
   try {
-    const { fullName, email } = await request.json();
+    const { fullName, email, licenseTypeId } = await request.json();
 
     if (!fullName || !email) {
       return NextResponse.json({ error: "Missing name or email" }, { status: 400 });
@@ -79,6 +79,25 @@ export async function POST(request: NextRequest) {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
     const redirectOrigin = getAppOrigin(request);
+    let validatedLicenseTypeId: string | null = null;
+
+    if (licenseTypeId) {
+      const { data: licenseType, error: licenseTypeError } = await supabaseAdmin
+        .from("license_types")
+        .select("id")
+        .eq("id", licenseTypeId)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (licenseTypeError || !licenseType) {
+        return NextResponse.json(
+          { error: "Selected licence type is not available" },
+          { status: 400 }
+        );
+      }
+
+      validatedLicenseTypeId = licenseType.id;
+    }
 
     const { data, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: { full_name: fullName, role: "client" },
@@ -112,6 +131,9 @@ export async function POST(request: NextRequest) {
       email,
       profile_id: data.user.id,
       onboarding_complete: false,
+      license_type_id: validatedLicenseTypeId,
+      license_status: "active",
+      license_starts_on: new Date().toISOString().split("T")[0],
     });
 
     if (clientError) {

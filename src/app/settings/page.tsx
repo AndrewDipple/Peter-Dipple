@@ -14,6 +14,7 @@ import {
   getPushStatus,
   type PushStatus,
 } from "@/lib/pushNotifications";
+import { sendTestPush } from "@/lib/clientPush";
 
 import {
   getActiveCompanionView,
@@ -58,6 +59,7 @@ export default function SettingsPage() {
   const [pushStatus, setPushStatus] = useState<PushStatus>("unsupported");
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [updatingPush, setUpdatingPush] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
 
     const [availablePaths, setAvailablePaths] = useState<CompanionPath[]>([]);
 
@@ -270,6 +272,34 @@ export default function SettingsPage() {
     setUpdatingPush(false);
   };
 
+  const handleTestPush = async () => {
+    setTestingPush(true);
+    setPushMessage(null);
+
+    try {
+      const result = await sendTestPush();
+
+      if (!result) {
+        setPushMessage("Please sign in again before sending a test notification.");
+      } else if (result.push.sent > 0) {
+        setPushMessage("Test notification sent.");
+      } else if (result.push.skipped) {
+        setPushMessage(
+          "No enabled push subscription was found. Try turning push off and on again for this device."
+        );
+      } else {
+        setPushMessage(
+          "The test notification could not be delivered. Try turning push off and on again for this device."
+        );
+      }
+    } catch (error) {
+      console.warn("Test push failed:", error);
+      setPushMessage("Test notification could not be sent. Please try again.");
+    } finally {
+      setTestingPush(false);
+    }
+  };
+
 
   if (loading) {
     return <div className="p-6"><p>Loading...</p></div>;
@@ -437,14 +467,24 @@ export default function SettingsPage() {
               </div>
 
               {pushStatus === "enabled" ? (
-                <button
-                  type="button"
-                  onClick={handleDisablePush}
-                  disabled={updatingPush}
-                  className={styles.buttonSecondary}
-                >
-                  {updatingPush ? "Updating..." : "Turn off"}
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleTestPush}
+                    disabled={testingPush || updatingPush}
+                    className={styles.buttonPrimary}
+                  >
+                    {testingPush ? "Sending..." : "Send test"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDisablePush}
+                    disabled={updatingPush || testingPush}
+                    className={styles.buttonSecondary}
+                  >
+                    {updatingPush ? "Updating..." : "Turn off"}
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"

@@ -200,6 +200,35 @@ function StatsSkeleton() {
   );
 }
 
+function PersonalBestsSkeleton() {
+  return (
+    <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-3" aria-label="Loading personal bests">
+      {[0, 1, 2].map((index) => (
+        <div
+          key={index}
+          className="min-h-80 rounded-xl border border-border-subtle bg-surface-raised p-4"
+        >
+          <div className="flex items-center gap-2">
+            <SkeletonBlock className="h-5 w-5 rounded-full" />
+            <SkeletonBlock className="h-4 w-28" />
+          </div>
+          <div className="mt-5 flex min-h-52 flex-col justify-center rounded-lg bg-surface-sunken p-4">
+            <SkeletonBlock className="mx-auto h-3 w-24 bg-surface" />
+            <SkeletonBlock className="mx-auto mt-4 h-8 w-32 bg-surface" />
+            <SkeletonBlock className="mx-auto mt-3 h-4 w-44 bg-surface" />
+            <SkeletonBlock className="mt-5 h-14 w-full bg-surface" />
+          </div>
+          <div className="mt-4 flex h-8 justify-center gap-2">
+            <SkeletonBlock className="h-3 w-7 rounded-full" />
+            <SkeletonBlock className="h-3 w-3 rounded-full" />
+            <SkeletonBlock className="h-3 w-3 rounded-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ClientStatsPage() {
   const [client, setClient] = useState<Client | null>(null);
 
@@ -1009,7 +1038,7 @@ const handleUploadPhotos = async () => {
             </div>
 
             {loadingPRs ? (
-              <p className={styles.body}>Loading personal bests...</p>
+              <PersonalBestsSkeleton />
             ) : (
               <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-3">
                 {/* Rotating Training Insights */}
@@ -1331,13 +1360,15 @@ const handleUploadPhotos = async () => {
             </div>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-ink-muted">
-                {loadingDailyTracking
-                  ? "Loading this day..."
-                  : dailyTrackingRecord
+              {loadingDailyTracking ? (
+                <SkeletonBlock className="h-4 w-64" />
+              ) : (
+                <p className="text-sm text-ink-muted">
+                  {dailyTrackingRecord
                     ? "Existing entry found. Saving will update it."
                     : "No entry yet. Saving will create one."}
-              </p>
+                </p>
+              )}
               <button
                 type="button"
                 onClick={handleSaveDailyTracking}

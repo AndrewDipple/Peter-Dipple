@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import { lookupExerciseIdsByName, getExerciseIdForName } from "@/lib/exerciseLinking";
 import { hasAcceptedCurrentLegal } from "@/lib/legal";
-import { getMondayOf } from "@/lib/dates";
+import { getSundayOf } from "@/lib/dates";
 
 type Client = {
   id: string;
@@ -383,7 +383,7 @@ const exerciseRows = ((templateExercises ?? []) as TemplateExercise[]).map(
 
     setSubmitting(true);
     const today = new Date().toISOString().split("T")[0];
-    const weekStart = getMondayOf(today);
+    const weekStart = getSundayOf(today);
 
     try {
       const uploads: Array<{ type: "front" | "back" | "side"; file: File }> = [

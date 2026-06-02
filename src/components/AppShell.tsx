@@ -14,6 +14,7 @@ import {
   ClipboardList,
   LogOut,
   MessageSquare,
+  MessageCircle,
   Settings,
   Bell,
   Shield,
@@ -26,6 +27,7 @@ import CompanionEvolutionCelebration, {
 import { useTheme } from "@/contexts/ThemeContext";
 import { Role, isAdmin, isStaff } from "@/lib/roles";
 import { addDays, getMondayOf, todayStr } from "@/lib/dates";
+import { notifyAdminFeedbackPush } from "@/lib/clientPush";
 
 type NavItem = {
   href: string;
@@ -40,6 +42,7 @@ const trainerNav: NavItem[] = [
   { href: "/recipes", label: "Recipes", icon: ChefHat },
   { href: "/trainer/program-templates", label: "Programmes", icon: ClipboardList },
   { href: "/trainer/exercises/new", label: "Exercises", icon: Dumbbell },
+  { href: "/trainer/community", label: "Community", icon: MessageCircle },
   { href: "/trainer/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
@@ -53,6 +56,7 @@ const clientNav: NavItem[] = [
     matches: ["/client/nutrition", "/client/meal-planner", "/client/shopping-list"],
   },
   { href: "/client/stats", label: "Stats", icon: BarChart3 },
+  { href: "/client/community", label: "Community", icon: MessageCircle },
 ];
 
 type Props = {
@@ -307,6 +311,11 @@ export default function AppShell({ userType, children }: Props) {
     router.push("/messages");
   };
 
+  const handleOpenCommunity = () => {
+    setMenuOpen(false);
+    router.push(isStaff(userType) ? "/trainer/community" : "/client/community");
+  };
+
   const handleOpenGuides = () => {
     setMenuOpen(false);
     router.push("/client/guides");
@@ -339,21 +348,27 @@ export default function AppShell({ userType, children }: Props) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const { error } = await supabase.from("feedback").insert([
-      {
+    const { data, error } = await supabase
+      .from("feedback")
+      .insert({
         user_id: user?.id || null,
         user_name: displayName || "Anonymous",
         type: feedbackType,
         title: feedbackTitle.trim(),
         description: feedbackDescription.trim(),
         page_url: window.location.href,
-      },
-    ]);
+      })
+      .select("id")
+      .single();
 
     if (error) {
       alert("Error submitting feedback. Please try again.");
       setSubmitting(false);
       return;
+    }
+
+    if (data?.id) {
+      notifyAdminFeedbackPush(data.id);
     }
 
     alert("Thank you for your feedback!");
@@ -459,6 +474,15 @@ export default function AppShell({ userType, children }: Props) {
                 >
                   <MessageSquare size={16} />
                   Messages
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenCommunity}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium hover:bg-gray-100"
+                >
+                  <MessageCircle size={16} />
+                  Community
                 </button>
 
                 {!isStaff(userType) && (

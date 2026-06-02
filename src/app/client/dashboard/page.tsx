@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { getMondayOf, todayStr } from "@/lib/dates";
+import { getMondayOf, getSundayOf, todayStr } from "@/lib/dates";
 import { updateStreak } from "@/lib/streaks";
 import TourModal from "@/components/TourModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
@@ -33,7 +33,7 @@ type Client = {
   onboarding_completed_at?: string | null;
   created_at?: string | null;
   tour_completed_at: string | null;  // NEW
-  daily_step_target: number;
+  daily_step_target: number | null;
   terms_accepted_at?: string | null;
   privacy_accepted_at?: string | null;
   health_data_consent_at?: string | null;
@@ -145,16 +145,18 @@ type DailyTracking = {
   steps_logged: number | null;
 };
 
+type MilestoneQuestion = {
+  question: string;
+  type: "text" | "number" | "radio";
+  options?: string[];
+};
+
 type MilestoneConfig = {
   id: string;
   week_number: number;
   requires_questionnaire: boolean;
   requires_photos: boolean;
-  questionnaire_questions: Array<{
-    question: string;
-    type: "text" | "number" | "radio";
-    options?: string[];
-  }>;
+  questionnaire_questions: MilestoneQuestion[];
 };
 
 type ClientMilestone = {
@@ -178,6 +180,64 @@ type PtSessionRequest = {
   confirmed_start_at: string | null;
   created_at: string;
 };
+
+const normalizeMilestoneQuestions = (value: unknown): MilestoneQuestion[] => {
+  let parsed = value;
+
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      console.warn("Milestone questionnaire questions contain invalid JSON");
+      return [];
+    }
+  }
+
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    "questions" in parsed
+  ) {
+    parsed = (parsed as { questions: unknown }).questions;
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.warn("Milestone questionnaire questions are not an array", parsed);
+    return [];
+  }
+
+  return parsed.flatMap((question): MilestoneQuestion[] => {
+    if (!question || typeof question !== "object") return [];
+
+    const candidate = question as Record<string, unknown>;
+    if (typeof candidate.question !== "string") return [];
+    if (!["text", "number", "radio"].includes(String(candidate.type))) return [];
+
+    const normalized: MilestoneQuestion = {
+      question: candidate.question,
+      type: candidate.type as MilestoneQuestion["type"],
+    };
+
+    if (Array.isArray(candidate.options)) {
+      normalized.options = candidate.options.filter(
+        (option): option is string => typeof option === "string"
+      );
+    }
+
+    return [normalized];
+  });
+};
+
+const normalizeMilestoneConfig = (config: Record<string, unknown>): MilestoneConfig => ({
+  id: String(config.id),
+  week_number: Number(config.week_number),
+  requires_questionnaire: Boolean(config.requires_questionnaire),
+  requires_photos: Boolean(config.requires_photos),
+  questionnaire_questions: normalizeMilestoneQuestions(
+    config.questionnaire_questions
+  ),
+});
 
 const getNextWorkoutDay = (
   days: ClientProgramDay[],
@@ -245,6 +305,8 @@ export default function ClientDashboardPage() {
 
 const today = useMemo(() => todayStr(), []);
   const weekStart = useMemo(() => getMondayOf(today), [today]);
+  const checkInWeekStart = useMemo(() => getSundayOf(today), [today]);
+  const dailyStepTarget = client?.daily_step_target ?? 5000;
   const companionDisplayName = companionView
     ? companionView.companion.custom_name ??
       companionView.path.default_name ??
@@ -292,6 +354,7 @@ const [showTour, setShowTour] = useState(false);
       .maybeSingle();
 
     if (!config) return;
+    const normalizedConfig = normalizeMilestoneConfig(config);
 
     const { data: existing } = await supabase
       .from("client_milestones")
@@ -302,13 +365,13 @@ const [showTour, setShowTour] = useState(false);
 
     if (existing) {
       const questionnaireComplete =
-        !config.requires_questionnaire || existing.questionnaire_completed;
-      const photosComplete = !config.requires_photos || existing.photos_completed;
+        !normalizedConfig.requires_questionnaire || existing.questionnaire_completed;
+      const photosComplete = !normalizedConfig.requires_photos || existing.photos_completed;
 
       if (questionnaireComplete && photosComplete) return;
 
       setClientMilestone(existing);
-      setMilestoneConfig(config);
+      setMilestoneConfig(normalizedConfig);
       setShowMilestoneModal(true);
       return;
     }
@@ -328,7 +391,7 @@ const [showTour, setShowTour] = useState(false);
 
     if (newMilestone) {
       setClientMilestone(newMilestone);
-      setMilestoneConfig(config);
+      setMilestoneConfig(normalizedConfig);
       setShowMilestoneModal(true);
     }
   };
@@ -578,7 +641,7 @@ const handleSaveSteps = async () => {
   // Capture the previous step count before we update, so we can detect
   // whether this save crosses the target threshold for the first time today.
   const previousSteps = dailyTracking?.steps_logged ?? 0;
-  const target = client.daily_step_target;
+  const target = client.daily_step_target ?? 5000;
   const crossingTarget = previousSteps < target && steps >= target;
 
   if (dailyTracking) {
@@ -975,7 +1038,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                     />
 
                     <span className="shrink-0 text-sm text-ink-muted">
-                      / {client.daily_step_target.toLocaleString()}
+                      / {dailyStepTarget.toLocaleString()}
                     </span>
 
                     <button
@@ -994,7 +1057,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                         style={{
                           width: `${Math.min(
                             ((dailyTracking?.steps_logged ?? 0) /
-                              client.daily_step_target) *
+                              dailyStepTarget) *
                               100,
                             100
                           )}%`,
@@ -1192,11 +1255,11 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
 
             <WeeklyCheckInCard
               clientId={client.id}
-              weekStart={weekStart}
+              weekStart={checkInWeekStart}
               onboardingCompletedAt={
                 client.onboarding_completed_at ?? client.created_at ?? null
               }
-              presentation={today === weekStart ? "modal" : "card"}
+              presentation={today === checkInWeekStart ? "modal" : "card"}
             />
 
             {/* Background habit tracking stays silent; streak and leaderboard UI are intentionally hidden. */}
@@ -1207,7 +1270,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
       {showMilestoneModal && milestoneConfig && clientMilestone && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
           <div
-            className={`${styles.card} max-h-[90vh] w-full max-w-2xl overflow-y-auto`}
+            className={`${styles.modalCard} max-h-[90vh] w-full max-w-2xl overflow-y-auto`}
           >
             <div>
               <h2 className={styles.h2}>

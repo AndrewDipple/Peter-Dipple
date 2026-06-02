@@ -13,6 +13,60 @@ type Client = {
   last_seen_at: string | null;
   last_sign_in_at: string | null;
   last_active_at: string | null;
+  license_status: string | null;
+  license_expires_on: string | null;
+  license_types:
+    | {
+        name: string | null;
+      }
+    | {
+        name: string | null;
+      }[]
+    | null;
+};
+
+const getLicenseTypeName = (client: Client) => {
+  const licenseType = Array.isArray(client.license_types)
+    ? client.license_types[0]
+    : client.license_types;
+  return licenseType?.name ?? "No licence type";
+};
+
+const getLicenseBadge = (client: Client) => {
+  const status = client.license_status ?? "active";
+
+  if (["paused", "expired", "cancelled"].includes(status)) {
+    return {
+      label: status.replaceAll("_", " "),
+      className: "border-red-200 bg-red-50 text-red-700",
+    };
+  }
+
+  if (client.license_expires_on) {
+    const daysUntilExpiry = Math.ceil(
+      (new Date(`${client.license_expires_on}T12:00:00`).getTime() - Date.now()) /
+        (1000 * 60 * 60 * 24)
+    );
+
+    if (daysUntilExpiry < 0) {
+      return {
+        label: "expired date",
+        className: "border-red-200 bg-red-50 text-red-700",
+      };
+    }
+
+    if (daysUntilExpiry <= 14) {
+      return {
+        label: `expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}`,
+        className: "border-gold bg-gold/10 text-gold",
+      };
+    }
+  }
+
+  return {
+    label: status,
+    className: "border-emerald/30 bg-emerald/10 text-emerald",
+  };
 };
 
 export default function TrainerClientsPage() {
@@ -23,13 +77,13 @@ export default function TrainerClientsPage() {
     const loadClients = async () => {
       const { data, error } = await supabase
         .from("clients")
-        .select("id, full_name, email, profile_id, last_seen_at, profiles(last_sign_in_at)")
+        .select("id, full_name, email, profile_id, last_seen_at, license_status, license_expires_on, license_types(name), profiles(last_sign_in_at)")
         .order("full_name", { ascending: true });
 
       let clientRows: any[] | null = data;
       let clientError = error;
 
-      if (error?.code === "42703") {
+      if (error) {
         const fallback = await supabase
           .from("clients")
           .select("id, full_name, email, profile_id, profiles(last_sign_in_at)")
@@ -45,15 +99,21 @@ export default function TrainerClientsPage() {
         return;
       }
 
-      const flattened: Client[] = (clientRows ?? []).map((c: any) => ({
-        id: c.id,
-        full_name: c.full_name,
-        email: c.email,
-        profile_id: c.profile_id,
-        last_seen_at: c.last_seen_at ?? null,
-        last_sign_in_at: c.profiles?.last_sign_in_at ?? null,
-        last_active_at: c.last_seen_at ?? c.profiles?.last_sign_in_at ?? null,
-      }));
+      const flattened: Client[] = (clientRows ?? []).map((c: any) => {
+        const profile = Array.isArray(c.profiles) ? c.profiles[0] : c.profiles;
+        return {
+          id: c.id,
+          full_name: c.full_name,
+          email: c.email,
+          profile_id: c.profile_id,
+          last_seen_at: c.last_seen_at ?? null,
+          last_sign_in_at: profile?.last_sign_in_at ?? null,
+          last_active_at: c.last_seen_at ?? profile?.last_sign_in_at ?? null,
+          license_status: c.license_status ?? null,
+          license_expires_on: c.license_expires_on ?? null,
+          license_types: c.license_types ?? null,
+        };
+      });
 
       setClients(flattened);
       setLoading(false);
@@ -101,6 +161,7 @@ export default function TrainerClientsPage() {
         <div className="space-y-4">
           {clients.map((client) => {
             const { text, color } = getLastActive(client.last_active_at);
+            const licenseBadge = getLicenseBadge(client);
             return (
               <Link
                 key={client.id}
@@ -114,6 +175,16 @@ export default function TrainerClientsPage() {
                         {client.full_name}
                       </h2>
                       <p className="mt-1 text-sm text-ink-muted">{client.email}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-ink-muted">
+                          {getLicenseTypeName(client)}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${licenseBadge.className}`}
+                        >
+                          {licenseBadge.label}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="text-right">

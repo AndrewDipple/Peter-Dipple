@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { styles } from "@/lib/design";
 import { supabase } from "@/lib/supabase";
-import { getMondayOf } from "@/lib/dates";
+import { getSundayOf } from "@/lib/dates";
 import { CalendarClock } from "lucide-react";
 
 type Client = {
@@ -12,11 +12,21 @@ type Client = {
   full_name: string;
   email: string;
   calorie_target: number | null;
-  daily_step_target: number;
+  daily_step_target: number | null;
   profile_id: string | null;
   last_seen_at: string | null;
   last_sign_in_at: string | null;
   last_active_at: string | null;
+  license_status: string | null;
+  license_expires_on: string | null;
+  license_types:
+    | {
+        name: string | null;
+      }
+    | {
+        name: string | null;
+      }[]
+    | null;
 };
 
 type WorkoutSetLog = {
@@ -91,6 +101,54 @@ type ClientStatusCard = {
   waterCompleted: boolean;
 };
 
+const getLicenseTypeName = (client: Client) => {
+  const licenseType = Array.isArray(client.license_types)
+    ? client.license_types[0]
+    : client.license_types;
+  return licenseType?.name ?? "No licence type";
+};
+
+const getLicenseAttention = (client: Client) => {
+  const status = client.license_status ?? "active";
+
+  if (["paused", "expired", "cancelled"].includes(status)) {
+    return {
+      title: `Licence ${status}`,
+      detail: getLicenseTypeName(client),
+      tone: "red" as const,
+    };
+  }
+
+  if (!client.license_expires_on) return null;
+
+  const daysUntilExpiry = Math.ceil(
+    (new Date(`${client.license_expires_on}T12:00:00`).getTime() - Date.now()) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  if (daysUntilExpiry < 0) {
+    return {
+      title: "Licence date expired",
+      detail: `${getLicenseTypeName(client)} expired ${Math.abs(daysUntilExpiry)} day${
+        Math.abs(daysUntilExpiry) === 1 ? "" : "s"
+      } ago`,
+      tone: "red" as const,
+    };
+  }
+
+  if (daysUntilExpiry <= 14) {
+    return {
+      title: "Licence expiring soon",
+      detail: `${getLicenseTypeName(client)} expires in ${daysUntilExpiry} day${
+        daysUntilExpiry === 1 ? "" : "s"
+      }`,
+      tone: "amber" as const,
+    };
+  }
+
+  return null;
+};
+
 function getDateString(date: Date) {
   return date.toISOString().split("T")[0];
 }
@@ -119,7 +177,7 @@ export default function TrainerDashboardPage() {
   const [updatingPtRequestId, setUpdatingPtRequestId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const selectedWeekStart = useMemo(() => getMondayOf(selectedDate), [selectedDate]);
+  const selectedWeekStart = useMemo(() => getSundayOf(selectedDate), [selectedDate]);
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -192,6 +250,18 @@ export default function TrainerDashboardPage() {
     });
 
     clientCards.forEach((card) => {
+      const licenseAttention = getLicenseAttention(card.client);
+      if (licenseAttention) {
+        items.push({
+          key: `licence-${card.client.id}`,
+          clientId: card.client.id,
+          clientName: card.client.full_name,
+          title: licenseAttention.title,
+          detail: licenseAttention.detail,
+          tone: licenseAttention.tone,
+        });
+      }
+
       const daysSinceActivity = getDaysSinceActivity(card.client.last_active_at);
       if (daysSinceActivity !== null && daysSinceActivity > 7) {
         items.push({
@@ -229,14 +299,14 @@ export default function TrainerDashboardPage() {
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
         .select(
-          "id, full_name, email, calorie_target, daily_step_target, profile_id, last_seen_at, profiles(last_sign_in_at)"
+          "id, full_name, email, calorie_target, daily_step_target, profile_id, last_seen_at, license_status, license_expires_on, license_types(name), profiles(last_sign_in_at)"
         )
         .order("full_name", { ascending: true });
 
       let clientRows: any[] | null = clientsData;
       let clientError = clientsError;
 
-      if (clientsError?.code === "42703") {
+      if (clientsError) {
         const fallback = await supabase
           .from("clients")
           .select(
@@ -283,6 +353,9 @@ export default function TrainerDashboardPage() {
           last_seen_at: lastSeen,
           last_sign_in_at: lastSignIn,
           last_active_at: lastSeen ?? lastSignIn,
+          license_status: client.license_status ?? null,
+          license_expires_on: client.license_expires_on ?? null,
+          license_types: client.license_types ?? null,
         };
       }) as Client[];
       const clientIds = clients.map((client) => client.id);
@@ -807,6 +880,9 @@ export default function TrainerDashboardPage() {
                     <p className={`mt-1 text-xs font-medium ${getLastActiveColor(card.client.last_active_at)}`}>
                       Last active: {getLastActiveText(card.client.last_active_at)}
                     </p>
+                    <p className="mt-1 text-xs text-ink-muted">
+                      Licence: {getLicenseTypeName(card.client)}
+                    </p>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
@@ -823,7 +899,7 @@ export default function TrainerDashboardPage() {
                         {card.workout.label}
                       </p>
                       <p className="mt-1 text-xs opacity-70">
-                        Steps: {card.steps?.toLocaleString() ?? "0"} / {card.client.daily_step_target.toLocaleString()}
+                        Steps: {card.steps?.toLocaleString() ?? "0"} / {(card.client.daily_step_target ?? 5000).toLocaleString()}
                       </p>
                     </div>
 

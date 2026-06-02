@@ -22,6 +22,14 @@ export const getMondayOf = (dateStr: string): string => {
   return toLocalDateStr(d);
 };
 
+// Returns the Sunday of the week containing the given date string.
+export const getSundayOf = (dateStr: string): string => {
+  const d = parseLocalDate(dateStr);
+  const day = d.getDay();
+  d.setDate(d.getDate() - day);
+  return toLocalDateStr(d);
+};
+
 export const todayStr = (): string => toLocalDateStr(new Date());
 
 // Add `days` to a YYYY-MM-DD date string, returning a new YYYY-MM-DD string.

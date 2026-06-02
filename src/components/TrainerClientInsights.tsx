@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { supabase } from "@/lib/supabase";
-import { addDays, getMondayOf, todayStr } from "@/lib/dates";
+import { addDays, getSundayOf, todayStr } from "@/lib/dates";
 import { styles } from "@/lib/design";
 
 type ClientProgramDay = {
@@ -144,22 +144,12 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
   const [loading, setLoading] = useState(true);
 
   const today = useMemo(() => todayStr(), []);
-  const weekStart = useMemo(() => getMondayOf(today), [today]);
+  const weekStart = useMemo(() => getSundayOf(today), [today]);
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
 
   useEffect(() => {
     const loadInsights = async () => {
       setLoading(true);
-
-      const { data: programData } = await supabase
-        .from("client_programs")
-        .select("id")
-        .eq("client_id", clientId)
-        .or("status.eq.active,status.is.null")
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      const programId = programData?.[0]?.id ?? null;
 
       const [
         clientRes,
@@ -208,12 +198,20 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
 
       const loadedCheckIns = (checkInRes.data ?? []) as WeeklyCheckIn[];
       const dailyCalorieTarget = clientRes.data?.calorie_target ?? null;
+      const loadedWorkouts = (workoutRes.data ?? []) as WorkoutCompletion[];
+      const completedDayIds = [
+        ...new Set(
+          loadedWorkouts
+            .map((workout) => workout.client_program_day_id)
+            .filter(Boolean)
+        ),
+      ];
 
-      if (programId) {
+      if (completedDayIds.length > 0) {
         const { data: daysData } = await supabase
           .from("client_program_days")
           .select("id, day_name")
-          .eq("client_program_id", programId)
+          .in("id", completedDayIds)
           .order("sort_order", { ascending: true });
         setProgramDays((daysData ?? []) as ClientProgramDay[]);
       } else {
@@ -221,7 +219,7 @@ export default function TrainerClientInsights({ clientId }: TrainerClientInsight
       }
 
       setCheckIns(loadedCheckIns);
-      setWorkouts((workoutRes.data ?? []) as WorkoutCompletion[]);
+      setWorkouts(loadedWorkouts);
       setMessages((messageRes.data ?? []) as ClientMessage[]);
       setWeights((weightRes.data ?? []) as WeightLog[]);
       setPhotos((photoRes.data ?? []) as ProgressPhoto[]);

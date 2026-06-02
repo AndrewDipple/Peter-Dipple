@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
-import { addDays, formatWeekLabel, getMondayOf } from "@/lib/dates";
+import { addDays, formatWeekLabel, getSundayOf } from "@/lib/dates";
 import {
   awardBondXp,
   COMPANION_XP_REWARDS,
@@ -47,7 +47,7 @@ const getFirstCheckInWeek = (
   if (!onboardingCompletedAt) return weekStart;
 
   const onboardingDate = onboardingCompletedAt.slice(0, 10);
-  const onboardingWeekStart = getMondayOf(onboardingDate);
+  const onboardingWeekStart = getSundayOf(onboardingDate);
   const firstFullWeekStart = addDays(onboardingWeekStart, 7);
 
   return addDays(firstFullWeekStart, 7);

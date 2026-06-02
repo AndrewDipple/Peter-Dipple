@@ -51,6 +51,7 @@ type MeasurementLog = {
 
 type WorkoutCompletion = {
   id: string;
+  client_program_id: string | null;
   completed_date: string;
 };
 
@@ -99,6 +100,23 @@ type WeeklyCheckIn = {
   notes: string | null;
 };
 
+type ClientProgram = {
+  id: string;
+  program_template_id: string | null;
+  program_start_date: string | null;
+  created_at: string | null;
+  status: string | null;
+  archived_at: string | null;
+  completed_at: string | null;
+};
+
+type ProgramTemplate = {
+  id: string;
+  name: string;
+  duration_weeks: number | null;
+  days_per_week: number | null;
+};
+
 const toDateStr = (date: Date) => date.toISOString().split("T")[0];
 
 const getDaysBetween = (start: string, end: string) => {
@@ -129,6 +147,15 @@ const formatDelta = (value: number, unit: string) => {
 const formatValue = (value: number | null | undefined, unit: string) =>
   typeof value === "number" ? `${value}${unit}` : "-";
 
+const dateOnly = (value: string | null | undefined) =>
+  value ? value.split("T")[0] : null;
+
+const formatProgramStatus = (status: string | null) => {
+  if (!status || status === "active") return "Active";
+  if (status === "superseded") return "Archived";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+};
+
 export default function MonthlyClientReportPage({ params }: PageProps) {
   const [clientId, setClientId] = useState("");
   const [client, setClient] = useState<Client | null>(null);
@@ -145,6 +172,8 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
   const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
   const [comparisonPhotos, setComparisonPhotos] = useState<ProgressPhoto[]>([]);
   const [checkIns, setCheckIns] = useState<WeeklyCheckIn[]>([]);
+  const [programs, setPrograms] = useState<ClientProgram[]>([]);
+  const [programTemplates, setProgramTemplates] = useState<ProgramTemplate[]>([]);
   const [reportStart, setReportStart] = useState(() => addDays(todayStr(), -27));
   const [reportEnd, setReportEnd] = useState(() => todayStr());
   const [goals, setGoals] = useState("");
@@ -184,6 +213,8 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
         customMealRes,
         photoRes,
         checkInRes,
+        programRes,
+        templateRes,
         comparisonWeightRes,
         comparisonMeasurementRes,
         comparisonPhotoRes,
@@ -211,7 +242,7 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
           .order("log_date", { ascending: true }),
         supabase
           .from("client_workout_completions")
-          .select("id, completed_date")
+          .select("id, client_program_id, completed_date")
           .eq("client_id", clientId)
           .gte("completed_date", reportStart)
           .lte("completed_date", reportEnd)
@@ -252,6 +283,16 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
           .gte("week_start", reportStart)
           .lte("week_start", reportEnd)
           .order("week_start", { ascending: true }),
+        supabase
+          .from("client_programs")
+          .select(
+            "id, program_template_id, program_start_date, created_at, status, archived_at, completed_at"
+          )
+          .eq("client_id", clientId)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("program_templates")
+          .select("id, name, duration_weeks, days_per_week"),
         supabase
           .from("client_weight_logs")
           .select("id, weight_kg, log_date")
@@ -294,6 +335,8 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
         )
       );
       setCheckIns((checkInRes.data ?? []) as WeeklyCheckIn[]);
+      setPrograms((programRes.data ?? []) as ClientProgram[]);
+      setProgramTemplates((templateRes.data ?? []) as ProgramTemplate[]);
       setLoading(false);
     };
 
@@ -365,6 +408,47 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
     expectedWorkouts !== null
       ? Math.min(100, Math.round((workouts.length / expectedWorkouts) * 100))
       : null;
+
+  const templateById = useMemo(
+    () => new Map(programTemplates.map((template) => [template.id, template])),
+    [programTemplates]
+  );
+
+  const workoutCountsByProgram = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    workouts.forEach((workout) => {
+      if (!workout.client_program_id) return;
+      counts.set(
+        workout.client_program_id,
+        (counts.get(workout.client_program_id) ?? 0) + 1
+      );
+    });
+
+    return counts;
+  }, [workouts]);
+
+  const reportPrograms = useMemo(
+    () =>
+      programs
+        .filter((program) => {
+          const workoutCount = workoutCountsByProgram.get(program.id) ?? 0;
+          const start = program.program_start_date ?? dateOnly(program.created_at);
+          const end = dateOnly(program.archived_at) ?? dateOnly(program.completed_at);
+          const overlapsRange =
+            Boolean(start) &&
+            start! <= reportEnd &&
+            (!end || end >= reportStart);
+
+          return workoutCount > 0 || overlapsRange;
+        })
+        .sort((a, b) => {
+          const aStart = a.program_start_date ?? dateOnly(a.created_at) ?? "";
+          const bStart = b.program_start_date ?? dateOnly(b.created_at) ?? "";
+          return aStart.localeCompare(bStart);
+        }),
+    [programs, reportEnd, reportStart, workoutCountsByProgram]
+  );
 
   const trackingByDate = new Map(
     dailyTracking.map((item) => [item.log_date, item])
@@ -564,6 +648,66 @@ export default function MonthlyClientReportPage({ params }: PageProps) {
                 <p className="mt-1 text-sm text-ink-muted">average per logged day</p>
               </div>
             </div>
+
+            <section>
+              <h2 className="text-xl font-semibold text-ink">
+                Programme Context
+              </h2>
+              {reportPrograms.length === 0 ? (
+                <p className={`${styles.body} mt-3`}>
+                  No assigned programme overlapped this report period.
+                </p>
+              ) : (
+                <div className="mt-4 grid gap-3">
+                  {reportPrograms.map((program) => {
+                    const template = program.program_template_id
+                      ? templateById.get(program.program_template_id)
+                      : null;
+                    const start =
+                      program.program_start_date ?? dateOnly(program.created_at);
+                    const end =
+                      dateOnly(program.archived_at) ?? dateOnly(program.completed_at);
+                    const workoutCount = workoutCountsByProgram.get(program.id) ?? 0;
+
+                    return (
+                      <div
+                        key={program.id}
+                        className="rounded-lg border border-border-subtle p-4"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-ink">
+                              {template?.name ?? "Assigned programme"}
+                            </p>
+                            <p className="mt-1 text-xs text-ink-muted">
+                              {start
+                                ? `Started ${formatLongDate(start)}`
+                                : "Start date not set"}
+                              {end ? ` - ended ${formatLongDate(end)}` : ""}
+                            </p>
+                          </div>
+                          <span className="w-fit rounded-full bg-surface-sunken px-3 py-1 text-xs font-semibold text-ink-muted">
+                            {formatProgramStatus(program.status)}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+                          {template?.duration_weeks ? (
+                            <span>{template.duration_weeks} weeks</span>
+                          ) : null}
+                          {template?.days_per_week ? (
+                            <span>{template.days_per_week} days/week</span>
+                          ) : null}
+                          <span>
+                            {workoutCount} completed workout
+                            {workoutCount === 1 ? "" : "s"} in this report
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
             <section>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">

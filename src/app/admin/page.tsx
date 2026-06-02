@@ -12,6 +12,16 @@ type ReviewClient = {
   archived_at: string | null;
   deletion_requested_at: string | null;
   delete_after: string | null;
+  license_status: string | null;
+  license_expires_on: string | null;
+  license_types:
+    | {
+        name: string | null;
+      }
+    | {
+        name: string | null;
+      }[]
+    | null;
 };
 
 type AuditEvent = {
@@ -68,6 +78,8 @@ const formatEventType = (eventType: string) => {
     deletion_requested: "Deletion requested",
     retention_cleared: "Retention cleared",
     client_deleted: "Client deleted",
+    program_assigned: "Programme assigned",
+    program_restored: "Programme restored",
   };
 
   return labels[eventType] ?? eventType.replaceAll("_", " ");
@@ -92,7 +104,7 @@ export default function AdminReviewPage() {
         supabase
           .from("clients")
           .select(
-            "id, full_name, email, archived_at, deletion_requested_at, delete_after"
+            "id, full_name, email, archived_at, deletion_requested_at, delete_after, license_status, license_expires_on, license_types(name)"
           )
           .order("delete_after", { ascending: true, nullsFirst: false }),
         supabase
@@ -136,6 +148,18 @@ export default function AdminReviewPage() {
   const openFeedback = feedbackItems.filter(
     (item) => !["done", "closed"].includes(item.status ?? "new")
   );
+  const licenseWatchList = clients.filter((client) => {
+    if (client.license_status && !["active", "trial"].includes(client.license_status)) {
+      return true;
+    }
+
+    if (!client.license_expires_on) return false;
+    const daysUntilExpiry = Math.ceil(
+      (new Date(client.license_expires_on).getTime() - Date.now()) /
+        (1000 * 60 * 60 * 24)
+    );
+    return daysUntilExpiry <= 14;
+  });
   const filteredFeedback = feedbackItems.filter((item) =>
     feedbackFilter === "all" ? true : item.type === feedbackFilter
   );
@@ -205,6 +229,13 @@ export default function AdminReviewPage() {
     );
   };
 
+  const getLicenseTypeName = (client: ReviewClient) => {
+    const licenseType = Array.isArray(client.license_types)
+      ? client.license_types[0]
+      : client.license_types;
+    return licenseType?.name ?? "No licence type";
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -239,6 +270,42 @@ export default function AdminReviewPage() {
               </p>
             </div>
           </div>
+
+          <section className={styles.card}>
+            <h2 className={styles.h2}>Licence watch list</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Clients with paused/expired/cancelled licences, or licences expiring
+              within 14 days.
+            </p>
+            <div className="mt-4 space-y-2">
+              {licenseWatchList.length === 0 ? (
+                <p className="text-sm text-ink-muted">
+                  No licence reviews needed right now.
+                </p>
+              ) : (
+                licenseWatchList.map((client) => (
+                  <Link
+                    key={client.id}
+                    href={`/trainer/clients/${client.id}`}
+                    className="block rounded-md border border-border-subtle bg-surface-sunken p-3 transition hover:bg-surface-raised"
+                  >
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-semibold text-ink">{client.full_name}</p>
+                        <p className="text-sm text-ink-muted">
+                          {getLicenseTypeName(client)}
+                        </p>
+                      </div>
+                      <div className="text-sm text-ink-muted md:text-right">
+                        <p>Status: {client.license_status ?? "active"}</p>
+                        <p>Expires: {formatDate(client.license_expires_on)}</p>
+                      </div>
+                    </div>
+                  </Link>
+                ))
+              )}
+            </div>
+          </section>
 
           <section className={styles.card}>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

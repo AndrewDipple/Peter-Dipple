@@ -41,9 +41,14 @@ type Client = {
   bmr_estimate: number | null;
   tdee_estimate: number | null;
   onboarding_complete: boolean | null;
-  daily_step_target: number;
-    calorie_adjustment: number | null;          // NEW
-  trainer_activity_level: string | null;      // NEW
+  daily_step_target: number | null;
+  calorie_adjustment: number | null;
+  trainer_activity_level: string | null;
+  license_type_id?: string | null;
+  license_status?: string | null;
+  license_starts_on?: string | null;
+  license_expires_on?: string | null;
+  license_notes?: string | null;
   archived_at?: string | null;
   deletion_requested_at?: string | null;
   delete_after?: string | null;
@@ -90,6 +95,12 @@ type ClientProgram = {
   superseded_by_program_id?: string | null;
 };
 
+type ProgramActivitySummary = {
+  completedWorkouts: number;
+  loggedSets: number;
+  lastActivity: string | null;
+};
+
 type ClientProgramDay = {
   id: string;
   client_program_id: string;
@@ -125,6 +136,17 @@ type ProgramTemplate = {
   name: string;
   duration_weeks: number | null;
   days_per_week: number | null;
+};
+
+type LicenseType = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  includes_workouts: boolean;
+  includes_nutrition: boolean;
+  includes_bespoke: boolean;
+  includes_pt: boolean;
 };
 
 type WeightLog = {
@@ -221,6 +243,15 @@ function getWeekDates(dateStr: string): { start: string; end: string } {
   };
 }
 
+function getNextMondayString() {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const daysUntilMonday = dayOfWeek === 1 ? 7 : (8 - dayOfWeek) % 7 || 7;
+  const nextMonday = new Date(today);
+  nextMonday.setDate(today.getDate() + daysUntilMonday);
+  return getDateString(nextMonday);
+}
+
 function getStatusClasses(status: "green" | "amber" | "red") {
   if (status === "green") return "border-green-200 bg-green-50 text-green-700";
   if (status === "amber") return "border-amber-200 bg-amber-50 text-amber-700";
@@ -256,14 +287,20 @@ const ACTIVITY_OPTIONS = [
   { value: "extra_active", label: "Extra active (physical job + training)" },
 ];
 
+const LICENSE_STATUSES = ["trial", "active", "paused", "expired", "cancelled"];
+
 export default function ClientDetailPage({ params }: PageProps) {
   const router = useRouter();
   const [clientId, setClientId] = useState("");
   const [client, setClient] = useState<Client | null>(null);
   const [templates, setTemplates] = useState<ProgramTemplate[]>([]);
+  const [licenseTypes, setLicenseTypes] = useState<LicenseType[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [clientProgram, setClientProgram] = useState<ClientProgram | null>(null);
   const [programHistory, setProgramHistory] = useState<ClientProgram[]>([]);
+  const [programActivity, setProgramActivity] = useState<
+    Record<string, ProgramActivitySummary>
+  >({});
   const [restoringProgramId, setRestoringProgramId] = useState<string | null>(null);
   const [programDays, setProgramDays] = useState<ClientProgramDay[]>([]);
   const [reviewedDayId, setReviewedDayId] = useState<string | null>(null);
@@ -301,12 +338,26 @@ export default function ClientDetailPage({ params }: PageProps) {
 
   const [loading, setLoading] = useState(true);
   const [assigningTemplate, setAssigningTemplate] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignmentStartDate, setAssignmentStartDate] = useState(
+    getNextMondayString()
+  );
+  const [assignmentAcknowledged, setAssignmentAcknowledged] = useState(false);
   const [selectedDate, setSelectedDate] = useState(getDateString(new Date()));
 
 const [trainerActivity, setTrainerActivity] = useState<string>("");
 const [calorieAdjustment, setCalorieAdjustment] = useState<string>("0");
 const [savingTarget, setSavingTarget] = useState(false);
 const [savedFlash, setSavedFlash] = useState(false);
+const [licenseForm, setLicenseForm] = useState({
+  license_type_id: "",
+  license_status: "active",
+  license_starts_on: "",
+  license_expires_on: "",
+  license_notes: "",
+});
+const [licenseSaving, setLicenseSaving] = useState(false);
+const [licenseMessage, setLicenseMessage] = useState("");
 const [currentRole, setCurrentRole] = useState<string | null>(null);
 const [deleteConfirmation, setDeleteConfirmation] = useState("");
 const [deletingClient, setDeletingClient] = useState(false);
@@ -326,6 +377,53 @@ const [auditLoading, setAuditLoading] = useState(false);
 
   const getPhotoUrl = (photo: ComparisonProgressPhoto) =>
     photo.signed_url ?? photo.image_url;
+
+  const recordProgramAudit = async (
+    eventType: "program_assigned" | "program_restored",
+    metadata: Record<string, unknown>
+  ) => {
+    if (!clientId) return;
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) return;
+
+    const createdAt = new Date().toISOString();
+
+    try {
+      const response = await fetch("/api/admin/program-audit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          eventType,
+          clientId,
+          metadata,
+        }),
+      });
+
+      if (!response.ok) return;
+
+      setAuditEvents((events) =>
+        [
+          {
+            id: `local-program-${eventType}-${Date.now()}`,
+            event_type: eventType,
+            actor_profile_id: null,
+            created_at: createdAt,
+            metadata,
+          },
+          ...events,
+        ].slice(0, 10)
+      );
+    } catch (error) {
+      console.warn("Programme audit event was not recorded", error);
+    }
+  };
 
   const readableDate = useMemo(() => {
     return new Date(`${selectedDate}T12:00:00`).toLocaleDateString("en-GB", {
@@ -587,6 +685,13 @@ if (clientData) {
     clientData.trainer_activity_level ?? clientData.activity_level ?? ""
   );
   setCalorieAdjustment(String(clientData.calorie_adjustment ?? 0));
+  setLicenseForm({
+    license_type_id: clientData.license_type_id ?? "",
+    license_status: clientData.license_status ?? "active",
+    license_starts_on: clientData.license_starts_on ?? "",
+    license_expires_on: clientData.license_expires_on ?? "",
+    license_notes: clientData.license_notes ?? "",
+  });
 }
 
       const { data: weightData } = await supabase
@@ -636,6 +741,19 @@ if (clientData) {
 
       setTemplates(templateData ?? []);
 
+      const { data: licenseTypeData, error: licenseTypeError } = await supabase
+        .from("license_types")
+        .select(
+          "id, code, name, description, includes_workouts, includes_nutrition, includes_bespoke, includes_pt"
+        )
+        .order("sort_order", { ascending: true });
+
+      if (licenseTypeError) {
+        console.warn("Could not load license types", licenseTypeError);
+      } else {
+        setLicenseTypes((licenseTypeData ?? []) as LicenseType[]);
+      }
+
       const { data: programData } = await supabase
         .from("client_programs")
         .select("*")
@@ -670,6 +788,71 @@ if (clientData) {
         .order("created_at", { ascending: false });
 
       setProgramHistory((allProgramData ?? []) as ClientProgram[]);
+
+      const [completionActivityRes, setActivityRes] = await Promise.all([
+        supabase
+          .from("client_workout_completions")
+          .select("client_program_id, completed_date, completed_at")
+          .eq("client_id", id),
+        supabase
+          .from("client_program_set_logs")
+          .select("client_program_id, created_at")
+          .eq("client_id", id)
+          .eq("completed", true),
+      ]);
+
+      const activity: Record<string, ProgramActivitySummary> = {};
+
+      (allProgramData ?? []).forEach((program) => {
+        activity[program.id] = {
+          completedWorkouts: 0,
+          loggedSets: 0,
+          lastActivity: null,
+        };
+      });
+
+      (completionActivityRes.data ?? []).forEach((completion) => {
+        const programId = completion.client_program_id;
+        if (!programId) return;
+
+        activity[programId] ??= {
+          completedWorkouts: 0,
+          loggedSets: 0,
+          lastActivity: null,
+        };
+
+        activity[programId].completedWorkouts += 1;
+        const activityDate = completion.completed_at ?? completion.completed_date;
+        if (
+          activityDate &&
+          (!activity[programId].lastActivity ||
+            activityDate > activity[programId].lastActivity)
+        ) {
+          activity[programId].lastActivity = activityDate;
+        }
+      });
+
+      (setActivityRes.data ?? []).forEach((setLog) => {
+        const programId = setLog.client_program_id;
+        if (!programId) return;
+
+        activity[programId] ??= {
+          completedWorkouts: 0,
+          loggedSets: 0,
+          lastActivity: null,
+        };
+
+        activity[programId].loggedSets += 1;
+        if (
+          setLog.created_at &&
+          (!activity[programId].lastActivity ||
+            setLog.created_at > activity[programId].lastActivity)
+        ) {
+          activity[programId].lastActivity = setLog.created_at;
+        }
+      });
+
+      setProgramActivity(activity);
 
       setLoading(false);
     };
@@ -896,9 +1079,19 @@ if (clientData) {
     loadDateData();
   }, [selectedDate, clientId, clientProgram, programDays, weekDates]);
 
-  const handleAssignTemplate = async () => {
+  const handleOpenAssignModal = () => {
     if (!clientId || !selectedTemplateId) {
       alert("Please choose a template");
+      return;
+    }
+
+    setAssignmentStartDate(getNextMondayString());
+    setAssignmentAcknowledged(false);
+    setAssignModalOpen(true);
+  };
+
+  const handleAssignTemplate = async () => {
+    if (!clientId || !selectedTemplateId || !assignmentAcknowledged) {
       return;
     }
 
@@ -910,17 +1103,6 @@ if (clientData) {
       .eq("client_id", clientId)
       .or("status.eq.active,status.is.null");
 
-    if (existingPrograms?.length) {
-      const confirmed = window.confirm(
-        "This will assign a new active programme and archive the current one for history. Use Edit Active Programme for individual exercise changes. Continue?"
-      );
-
-      if (!confirmed) {
-        setAssigningTemplate(false);
-        return;
-      }
-    }
-
     const { data: newProgram, error: programError } = await supabase
       .from("client_programs")
       .insert([
@@ -928,6 +1110,8 @@ if (clientData) {
           client_id: clientId,
           program_template_id: selectedTemplateId,
           current_day_index: 0,
+          current_week: 1,
+          program_start_date: assignmentStartDate || null,
           status: "assigning",
         },
       ])
@@ -1049,7 +1233,18 @@ await notifyProgramAssigned(clientId, client.full_name, template.name);
   }
 }
 
+const assignedTemplate = templates.find((t) => t.id === selectedTemplateId);
+await recordProgramAudit("program_assigned", {
+  template_id: selectedTemplateId,
+  template_name: assignedTemplate?.name ?? null,
+  new_program_id: newProgram.id,
+  archived_program_ids: existingPrograms?.map((program) => program.id) ?? [],
+  program_start_date: assignmentStartDate || null,
+});
+
 alert("Template assigned!");
+setAssignModalOpen(false);
+setAssignmentAcknowledged(false);
 setClientProgram({ ...newProgram, status: "active" });
 setProgramHistory((prev) => [
   { ...newProgram, status: "active" },
@@ -1066,6 +1261,14 @@ setProgramHistory((prev) => [
         : program
     ),
 ]);
+setProgramActivity((prev) => ({
+  ...prev,
+  [newProgram.id]: {
+    completedWorkouts: 0,
+    loggedSets: 0,
+    lastActivity: null,
+  },
+}));
 setAssigningTemplate(false);
   };
 const handleRestoreProgram = async (program: ClientProgram) => {
@@ -1123,6 +1326,13 @@ const handleRestoreProgram = async (program: ClientProgram) => {
     .eq("client_program_id", restoredProgram.id)
     .order("sort_order", { ascending: true });
 
+  await recordProgramAudit("program_restored", {
+    restored_program_id: restoredProgram.id,
+    archived_program_id: clientProgram.id,
+    restored_template_id: restoredProgram.program_template_id,
+    archived_template_id: clientProgram.program_template_id,
+  });
+
   setClientProgram(restoredProgram as ClientProgram);
   setSelectedTemplateId(restoredProgram.program_template_id ?? "");
   setProgramDays(restoredDays ?? []);
@@ -1146,6 +1356,20 @@ const handleRestoreProgram = async (program: ClientProgram) => {
   );
   setRestoringProgramId(null);
 };
+
+const formatProgramActivityDate = (date: string | null) => {
+  if (!date) return null;
+
+  return new Date(date.includes("T") ? date : `${date}T12:00:00`).toLocaleDateString(
+    "en-GB",
+    {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }
+  );
+};
+
 const handleSaveCalorieTarget = async () => {
   if (!client || proposedTarget === null) return;
 
@@ -1180,6 +1404,42 @@ const handleSaveCalorieTarget = async () => {
   setSavingTarget(false);
   setSavedFlash(true);
   setTimeout(() => setSavedFlash(false), 2000);
+};
+
+const handleSaveLicense = async () => {
+  if (!client || licenseSaving) return;
+
+  setLicenseSaving(true);
+  setLicenseMessage("");
+
+  const payload = {
+    license_type_id: licenseForm.license_type_id || null,
+    license_status: licenseForm.license_status,
+    license_starts_on: licenseForm.license_starts_on || null,
+    license_expires_on: licenseForm.license_expires_on || null,
+    license_notes: licenseForm.license_notes.trim() || null,
+  };
+
+  const { error } = await supabase
+    .from("clients")
+    .update(payload)
+    .eq("id", client.id);
+
+  if (error) {
+    console.warn("Could not save licence", error);
+    setLicenseMessage(
+      "Could not save licence. If this is the first time, run the licensing SQL first."
+    );
+    setLicenseSaving(false);
+    return;
+  }
+
+  setClient({
+    ...client,
+    ...payload,
+  });
+  setLicenseMessage("Licence saved.");
+  setLicenseSaving(false);
 };
 
 const handleDeleteClient = async () => {
@@ -1377,6 +1637,8 @@ const formatAuditEvent = (eventType: string) => {
     deletion_requested: "Deletion requested",
     retention_cleared: "Retention cleared",
     client_deleted: "Client deleted",
+    program_assigned: "Programme assigned",
+    program_restored: "Programme restored",
   };
 
   return labels[eventType] ?? eventType.replaceAll("_", " ");
@@ -1390,6 +1652,13 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
 };
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+  const activeTemplateName =
+    templates.find((template) => template.id === clientProgram?.program_template_id)
+      ?.name ?? "Current active programme";
+  const selectedLicenseType = licenseTypes.find(
+    (licenseType) => licenseType.id === licenseForm.license_type_id
+  );
+  const dailyStepTarget = client?.daily_step_target ?? 5000;
 
   return (
     <>
@@ -1424,6 +1693,147 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                 >
                   Monthly report
                 </Link>
+              </div>
+            </div>
+
+            <div className={`${styles.card} mt-4`}>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="font-semibold text-ink">Licence</h3>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Track the client&apos;s commercial access here. This is admin
+                    visibility only for now; it does not gate features yet.
+                  </p>
+                </div>
+                {selectedLicenseType && (
+                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                    {selectedLicenseType.includes_workouts && (
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+                        Workouts
+                      </span>
+                    )}
+                    {selectedLicenseType.includes_nutrition && (
+                      <span className="rounded-full bg-emerald/10 px-3 py-1 text-emerald">
+                        Nutrition
+                      </span>
+                    )}
+                    {selectedLicenseType.includes_bespoke && (
+                      <span className="rounded-full bg-gold/10 px-3 py-1 text-gold">
+                        Bespoke
+                      </span>
+                    )}
+                    {selectedLicenseType.includes_pt && (
+                      <span className="rounded-full bg-ink px-3 py-1 text-white">
+                        PT
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-medium text-ink">Licence type</span>
+                  <select
+                    value={licenseForm.license_type_id}
+                    onChange={(event) =>
+                      setLicenseForm((current) => ({
+                        ...current,
+                        license_type_id: event.target.value,
+                      }))
+                    }
+                    className={`${styles.input} mt-1`}
+                  >
+                    <option value="">No licence type set</option>
+                    {licenseTypes.map((licenseType) => (
+                      <option key={licenseType.id} value={licenseType.id}>
+                        {licenseType.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-ink">Status</span>
+                  <select
+                    value={licenseForm.license_status}
+                    onChange={(event) =>
+                      setLicenseForm((current) => ({
+                        ...current,
+                        license_status: event.target.value,
+                      }))
+                    }
+                    className={`${styles.input} mt-1`}
+                  >
+                    {LICENSE_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {formatLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-ink">Starts</span>
+                  <input
+                    type="date"
+                    value={licenseForm.license_starts_on}
+                    onChange={(event) =>
+                      setLicenseForm((current) => ({
+                        ...current,
+                        license_starts_on: event.target.value,
+                      }))
+                    }
+                    className={`${styles.input} mt-1`}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-ink">Expires</span>
+                  <input
+                    type="date"
+                    value={licenseForm.license_expires_on}
+                    onChange={(event) =>
+                      setLicenseForm((current) => ({
+                        ...current,
+                        license_expires_on: event.target.value,
+                      }))
+                    }
+                    className={`${styles.input} mt-1`}
+                  />
+                </label>
+              </div>
+
+              <label className="mt-3 block">
+                <span className="text-sm font-medium text-ink">Licence notes</span>
+                <textarea
+                  value={licenseForm.license_notes}
+                  onChange={(event) =>
+                    setLicenseForm((current) => ({
+                      ...current,
+                      license_notes: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  className={`${styles.textarea} mt-1`}
+                  placeholder="Anything useful about the package, expiry, renewal, or payment setup."
+                />
+              </label>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSaveLicense}
+                  disabled={licenseSaving}
+                  className={`${styles.buttonPrimary} disabled:opacity-50`}
+                >
+                  {licenseSaving ? "Saving..." : "Save licence"}
+                </button>
+                {licenseMessage && (
+                  <span className="text-sm font-medium text-ink-muted">
+                    {licenseMessage}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1898,18 +2308,20 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                   )}
 
                   {clientProgram && (
-                    <p className="mt-2 text-sm text-ink-muted">
-                      A programme is currently assigned to this client.
-                    </p>
+                    <div className="mt-3 rounded-lg border border-emerald/30 bg-emerald/10 px-3 py-2 text-sm text-ink">
+                      A programme is currently active. Assigning a new template archives
+                      this one for history; it does not delete logged workouts or set data.
+                    </div>
                   )}
 
-                  {programHistory.length > 1 && (
+                  {programHistory.length > 0 && (
                     <div className="mt-4 rounded-xl border border-border-subtle bg-surface-sunken p-3">
                       <p className="text-sm font-semibold text-ink">
                         Programme history
                       </p>
                       <p className="mt-1 text-xs text-ink-muted">
-                        Restore a previous programme if a reassignment was made by mistake.
+                        Previous programmes remain here with their logged activity. Restore
+                        one if a reassignment was made by mistake.
                       </p>
 
                       <div className="mt-3 space-y-2">
@@ -1920,6 +2332,10 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                                 template.id === program.program_template_id
                             )?.name ?? "Programme";
                           const isActive = program.id === clientProgram?.id;
+                          const activity = programActivity[program.id];
+                          const lastActivity = formatProgramActivityDate(
+                            activity?.lastActivity ?? null
+                          );
                           const createdAt = program.created_at
                             ? new Date(program.created_at).toLocaleDateString(
                                 "en-GB",
@@ -1942,6 +2358,13 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                                 </p>
                                 <p className="text-xs text-ink-muted">
                                   {createdAt} - {isActive ? "Active" : program.status ?? "Archived"}
+                                </p>
+                                <p className="mt-1 text-xs text-ink-muted">
+                                  {activity?.completedWorkouts ?? 0} completed workout
+                                  {(activity?.completedWorkouts ?? 0) === 1 ? "" : "s"}{" "}
+                                  - {activity?.loggedSets ?? 0} logged set
+                                  {(activity?.loggedSets ?? 0) === 1 ? "" : "s"}
+                                  {lastActivity ? ` - last activity ${lastActivity}` : ""}
                                 </p>
                               </div>
 
@@ -1975,11 +2398,11 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                     </Link>
                   )}
                   <button
-                    onClick={handleAssignTemplate}
+                    onClick={handleOpenAssignModal}
                     disabled={assigningTemplate}
                     className={`${styles.buttonPrimary} disabled:opacity-50`}
                   >
-                    {assigningTemplate ? "Assigning..." : "Assign Template"}
+                    Assign New Programme
                   </button>
                 </div>
               </div>
@@ -2060,7 +2483,7 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                       {dailyTracking?.steps_logged?.toLocaleString() ?? "0"}
                     </p>
                     <p className="text-sm text-ink-muted">
-                      / {client.daily_step_target.toLocaleString()}
+                      / {dailyStepTarget.toLocaleString()}
                     </p>
                   </div>
                   {dailyTracking?.steps_logged !== null && (
@@ -2070,7 +2493,7 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
                         style={{
                           width: `${Math.min(
                             ((dailyTracking?.steps_logged ?? 0) /
-                              client.daily_step_target) *
+                              dailyStepTarget) *
                               100,
                             100
                           )}%`,
@@ -2443,6 +2866,109 @@ const getTrendReviewClasses = (status: WeightTrendReview["status"]) => {
               </div>
             </div>
           </section>
+        </div>
+      )}
+
+      {assignModalOpen && selectedTemplate && client && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4">
+          <div className={`${styles.modalCard} max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-gold">
+                  Programme assignment
+                </p>
+                <h2 className="mt-1 text-xl font-bold text-ink">
+                  Assign new active programme
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!assigningTemplate) setAssignModalOpen(false);
+                }}
+                className="rounded-full bg-surface-sunken p-2 text-ink-muted transition hover:text-ink"
+                aria-label="Close programme assignment confirmation"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm text-ink-muted">
+              <p>
+                You are assigning <span className="font-semibold text-ink">{selectedTemplate.name}</span>{" "}
+                to <span className="font-semibold text-ink">{client.full_name}</span>.
+              </p>
+
+              {clientProgram && (
+                <div className="rounded-lg border border-border-subtle bg-surface-sunken p-3">
+                  <p className="font-semibold text-ink">What will happen</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    <li>{activeTemplateName} becomes archived in programme history.</li>
+                    <li>Existing workout completions and set logs stay in stats, reports, and history.</li>
+                    <li>The client will see this new programme as their active workout plan.</li>
+                    <li>Use restore if this assignment was made by mistake.</li>
+                  </ul>
+                </div>
+              )}
+
+              {!clientProgram && (
+                <div className="rounded-lg border border-border-subtle bg-surface-sunken p-3">
+                  This will become the client&apos;s active workout programme.
+                </div>
+              )}
+            </div>
+
+            <label className="mt-4 block text-sm font-medium text-ink">
+              Programme start date
+              <input
+                type="date"
+                value={assignmentStartDate}
+                onChange={(event) => setAssignmentStartDate(event.target.value)}
+                className={`${styles.input} mt-1 w-full`}
+              />
+            </label>
+            <p className="mt-1 text-xs text-ink-muted">
+              Defaults to next Monday so the client starts on a clean training week.
+            </p>
+
+            <label className="mt-4 flex items-start gap-3 rounded-lg border border-border-subtle bg-surface-sunken p-3 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={assignmentAcknowledged}
+                onChange={(event) =>
+                  setAssignmentAcknowledged(event.target.checked)
+                }
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                I understand this starts a new active programme and keeps previous
+                workout history archived rather than deleted.
+              </span>
+            </label>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAssignModalOpen(false)}
+                disabled={assigningTemplate}
+                className={styles.buttonSecondary}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAssignTemplate}
+                disabled={
+                  assigningTemplate ||
+                  !assignmentAcknowledged ||
+                  !assignmentStartDate
+                }
+                className={`${styles.buttonPrimary} disabled:opacity-50`}
+              >
+                {assigningTemplate ? "Assigning..." : "Assign programme"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
