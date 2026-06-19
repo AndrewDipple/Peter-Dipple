@@ -522,7 +522,7 @@ if (!clientData.tour_completed_at) {
           program.current_week = calculatedWeek;
         }
 
-        await checkMilestone(clientData.id, calculatedWeek);
+        if (includesNutrition) await checkMilestone(clientData.id, calculatedWeek);
       }
 
       const { data: daysData, error: daysError } = await supabase
@@ -1289,21 +1289,23 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
               </Link>
             )}
 
-            <WeeklyCheckInCard
-              clientId={client.id}
-              weekStart={checkInWeekStart}
-              onboardingCompletedAt={
-                client.onboarding_completed_at ?? client.created_at ?? null
-              }
-              presentation={today === checkInWeekStart ? "modal" : "card"}
-            />
+            {includesNutrition && (
+              <WeeklyCheckInCard
+                clientId={client.id}
+                weekStart={checkInWeekStart}
+                onboardingCompletedAt={
+                  client.onboarding_completed_at ?? client.created_at ?? null
+                }
+                presentation={today === checkInWeekStart ? "modal" : "card"}
+              />
+            )}
 
             {/* Background habit tracking stays silent; streak and leaderboard UI are intentionally hidden. */}
           </div>
         )}
       </div>
 
-      {showMilestoneModal && milestoneConfig && clientMilestone && (
+      {includesNutrition && showMilestoneModal && milestoneConfig && clientMilestone && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
           <div
             className={`${styles.modalCard} max-h-[90vh] w-full max-w-2xl overflow-y-auto`}
