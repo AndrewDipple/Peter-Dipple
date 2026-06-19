@@ -26,6 +26,7 @@ import CompanionEvolutionCelebration, {
 } from "./CompanionEvolutionCelebration";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Role, isAdmin, isStaff } from "@/lib/roles";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
 import { addDays, getMondayOf, todayStr } from "@/lib/dates";
 import { notifyAdminFeedbackPush } from "@/lib/clientPush";
 
@@ -78,7 +79,11 @@ export default function AppShell({ userType, children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme } = useTheme();
-  const navItems = isStaff(userType) ? trainerNav : clientNav;
+  const { includesNutrition } = useClientFeatures();
+  const baseClientNav = isStaff(userType)
+    ? trainerNav
+    : clientNav.filter((item) => includesNutrition || item.href !== "/client/nutrition");
+  const navItems = baseClientNav;
   const dashboardHref = isStaff(userType) ? "/trainer/dashboard" : "/client/dashboard";
 
   const [menuOpen, setMenuOpen] = useState(false);

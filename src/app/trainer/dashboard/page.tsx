@@ -250,6 +250,8 @@ export default function TrainerDashboardPage() {
     });
 
     clientCards.forEach((card) => {
+      if (card.client.license_status !== "active") return;
+
       const licenseAttention = getLicenseAttention(card.client);
       if (licenseAttention) {
         items.push({
@@ -301,6 +303,7 @@ export default function TrainerDashboardPage() {
         .select(
           "id, full_name, email, calorie_target, daily_step_target, profile_id, last_seen_at, license_status, license_expires_on, license_types(name), profiles(last_sign_in_at)"
         )
+        .eq("license_status", "active")
         .order("full_name", { ascending: true });
 
       let clientRows: any[] | null = clientsData;
@@ -312,6 +315,7 @@ export default function TrainerDashboardPage() {
           .select(
             "id, full_name, email, calorie_target, daily_step_target, profile_id, profiles(last_sign_in_at)"
           )
+          .eq("license_status", "active")
           .order("full_name", { ascending: true });
 
         clientRows = fallback.data;

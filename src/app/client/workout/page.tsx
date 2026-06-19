@@ -19,6 +19,7 @@ import {
   type ActiveCompanionView,
 } from "@/lib/companions";
 import AchievementCelebration from "@/components/AchievementCelebration";
+import ProgramSwitcherModal, { type SwitchableProgram } from "@/components/ProgramSwitcherModal";
 import AlternativeExerciseModal from "@/components/AlternativeExerciseModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
@@ -47,6 +48,8 @@ type ClientProgram = {
   current_day_index: number | null;
   program_start_date: string | null;
   current_week: number;
+  status: string | null;
+  template_name: string | null;
 };
 
 type ClientProgramDay = {
@@ -260,6 +263,9 @@ export default function ClientWorkoutPage() {
   const [showAddExercise, setShowAddExercise] = useState(false);
   const [addingExercise, setAddingExercise] = useState(false);
   const [swappingBack, setSwappingBack] = useState<string | null>(null);
+
+  const [allPrograms, setAllPrograms] = useState<SwitchableProgram[]>([]);
+  const [showProgramSwitcher, setShowProgramSwitcher] = useState(false);
 
   // Companion state — flag-gated, only populated if enabled.
   const [companionEnabled, setCompanionEnabled] = useState(false);
@@ -478,9 +484,8 @@ export default function ClientWorkoutPage() {
         .from("client_programs")
         .select("*")
         .eq("client_id", clientData.id)
-        .or("status.eq.active,status.is.null")
-        .order("created_at", { ascending: false })
-        .limit(1);
+        .or("status.eq.active,status.eq.paused,status.is.null")
+        .order("created_at", { ascending: false });
 
     if (
       clientProgramError ||
@@ -492,8 +497,39 @@ export default function ClientWorkoutPage() {
       return;
     }
 
-    const program = clientProgramData[0];
-    setClientProgram(program);
+    // Best-effort: fetch template names for the switcher label.
+    // program_templates is staff-only via RLS so this may return nothing for
+    // clients — that's fine, the switcher falls back to a generic label.
+    const templateIds = clientProgramData
+      .map((p) => p.program_template_id)
+      .filter((id): id is string => Boolean(id));
+
+    const templateNames: Record<string, string> = {};
+    if (templateIds.length > 0) {
+      const { data: templates } = await supabase
+        .from("program_templates")
+        .select("id, name")
+        .in("id", templateIds);
+      templates?.forEach((t) => { templateNames[t.id] = t.name; });
+    }
+
+    const withName = (p: any): ClientProgram => ({
+      ...p,
+      template_name: p.program_template_id ? (templateNames[p.program_template_id] ?? null) : null,
+    });
+
+    const program =
+      clientProgramData.find((p) => p.status === "active" || p.status === null) ??
+      clientProgramData[0];
+
+    setAllPrograms(
+      clientProgramData.map((p) => ({
+        id: p.id,
+        template_name: p.program_template_id ? (templateNames[p.program_template_id] ?? null) : null,
+        status: p.status,
+      }))
+    );
+    setClientProgram(withName(program));
 
     const { data: daysData, error: daysError } = await supabase
       .from("client_program_days")
@@ -529,6 +565,14 @@ export default function ClientWorkoutPage() {
     const nextWorkoutDay = getNextWorkoutDay(daysData, completions);
     setSelectedDayId(nextWorkoutDay?.id ?? daysData[0].id);
     setLoading(false);
+  };
+
+  const handleSwitchProgram = async (target: SwitchableProgram) => {
+    if (!clientProgram) return;
+    await supabase.from("client_programs").update({ status: "paused" }).eq("id", clientProgram.id);
+    await supabase.from("client_programs").update({ status: "active" }).eq("id", target.id);
+    setShowProgramSwitcher(false);
+    await loadWorkout();
   };
 
   useEffect(() => {
@@ -2047,6 +2091,23 @@ export default function ClientWorkoutPage() {
             }
           />
 
+          {allPrograms.length > 1 && (
+            <div className="flex items-center justify-between rounded-lg border border-border-subtle bg-surface-sunken px-4 py-3">
+              <div>
+                <p className="text-xs text-ink-muted">Current programme</p>
+                <p className="mt-0.5 text-sm font-medium text-ink">
+                  {clientProgram.template_name ?? "Programme"}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowProgramSwitcher(true)}
+                className={styles.buttonSecondary}
+              >
+                Switch
+              </button>
+            </div>
+          )}
+
           <div className={styles.card}>
             <div className="flex items-center justify-between">
               <span className="text-sm text-ink">
@@ -2667,6 +2728,15 @@ activeExercise.exercise_details?.alternate && (
           clientProgramDayExerciseId={alternativeModalExercise.clientProgramDayExerciseId}
           onClose={() => setAlternativeModalExercise(null)}
           onSwapped={reloadWorkout}
+        />
+      )}
+
+      {showProgramSwitcher && clientProgram && (
+        <ProgramSwitcherModal
+          currentProgramId={clientProgram.id}
+          programs={allPrograms}
+          onConfirm={handleSwitchProgram}
+          onClose={() => setShowProgramSwitcher(false)}
         />
       )}
     </>

@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { touchClientLastSeen } from "@/lib/clientActivity";
+import { ClientFeaturesContext } from "@/contexts/ClientFeaturesContext";
 
 export default function ClientGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
+  const [includesNutrition, setIncludesNutrition] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -21,10 +23,10 @@ export default function ClientGuard({ children }: { children: React.ReactNode })
         return;
       }
 
-      // Check if user is a client
+      // Check if user is a client and fetch their licence features
       const { data: clientData } = await supabase
         .from("clients")
-        .select("id")
+        .select("id, license_types(includes_nutrition)")
         .eq("profile_id", user.id)
         .maybeSingle();
 
@@ -34,6 +36,11 @@ export default function ClientGuard({ children }: { children: React.ReactNode })
         setAuthorized(false);
         return;
       }
+
+      const licenseType = Array.isArray(clientData.license_types)
+        ? clientData.license_types[0]
+        : clientData.license_types;
+      setIncludesNutrition(licenseType?.includes_nutrition ?? true);
 
       setAuthorized(true);
       setLoading(false);
@@ -77,5 +84,9 @@ export default function ClientGuard({ children }: { children: React.ReactNode })
     );
   }
 
-  return <>{children}</>;
+  return (
+    <ClientFeaturesContext.Provider value={{ includesNutrition }}>
+      {children}
+    </ClientFeaturesContext.Provider>
+  );
 }

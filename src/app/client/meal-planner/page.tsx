@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import {
@@ -71,7 +72,12 @@ const sumDailyCalories = (meals: MealPlan[]): number =>
 };
 export default function ClientMealPlannerPage() {
   const router = useRouter();
+  const { includesNutrition } = useClientFeatures();
   const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (!includesNutrition) router.replace("/client/dashboard");
+  }, [includesNutrition, router]);
 
   const [client, setClient] = useState<Client | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);

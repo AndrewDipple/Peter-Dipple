@@ -218,7 +218,7 @@ export default function ClientOnboardingPage() {
 
       const { data: clientData } = await supabase
         .from("clients")
-        .select("id, profile_id, terms_accepted_at, privacy_accepted_at, health_data_consent_at, terms_version, privacy_version")
+        .select("id, profile_id, terms_accepted_at, privacy_accepted_at, health_data_consent_at, terms_version, privacy_version, license_types(includes_nutrition)")
         .eq("profile_id", user.id)
         .single();
 
@@ -229,6 +229,15 @@ export default function ClientOnboardingPage() {
 
       if (!hasAcceptedCurrentLegal(clientData)) {
         router.replace("/client/terms");
+        return;
+      }
+
+      // Workout-only clients use the lightweight modal on the dashboard instead
+      const licenseType = Array.isArray(clientData.license_types)
+        ? clientData.license_types[0]
+        : clientData.license_types;
+      if (licenseType?.includes_nutrition === false) {
+        router.replace("/client/dashboard");
         return;
       }
 

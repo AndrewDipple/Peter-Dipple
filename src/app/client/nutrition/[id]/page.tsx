@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
 import { styles } from "@/lib/design";
 import {
   getActiveCompanionView,
@@ -39,6 +41,8 @@ type PageProps = {
 };
 
 export default function ClientRecipeDetailPage({ params }: PageProps) {
+  const router = useRouter();
+  const { includesNutrition } = useClientFeatures();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [client, setClient] = useState<Client | null>(null);
   const [mealLog, setMealLog] = useState<MealLog | null>(null);
@@ -48,6 +52,12 @@ export default function ClientRecipeDetailPage({ params }: PageProps) {
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
+
+  useEffect(() => {
+    if (!includesNutrition) {
+      router.replace("/client/dashboard");
+    }
+  }, [includesNutrition, router]);
 
   useEffect(() => {
     const loadRecipe = async () => {

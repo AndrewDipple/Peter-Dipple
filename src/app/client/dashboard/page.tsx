@@ -8,6 +8,7 @@ import { styles } from "@/lib/design";
 import { getMondayOf, getSundayOf, todayStr } from "@/lib/dates";
 import { updateStreak } from "@/lib/streaks";
 import TourModal from "@/components/TourModal";
+import LightweightOnboardingModal from "@/components/LightweightOnboardingModal";
 import MessageTrainerBox from "@/components/MessageTrainerBox";
 import ClientUnreadRepliesBanner from "@/components/ClientUnreadRepliesBanner";
 import ThisWeekWorkouts from "@/components/ThisWeekWorkouts";
@@ -21,7 +22,8 @@ import {
   COMPANION_XP_REWARDS,
   type ActiveCompanionView,
 } from "@/lib/companions";
-import { CalendarClock, Sparkles } from "lucide-react";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
+import { CalendarClock, Sparkles, X } from "lucide-react";
 
 type Client = {
   id: string;
@@ -239,6 +241,14 @@ const normalizeMilestoneConfig = (config: Record<string, unknown>): MilestoneCon
   ),
 });
 
+const getMilestoneDismissalKey = (milestoneId: string) =>
+  `milestone-dismissed:${milestoneId}:${todayStr()}`;
+
+const isMilestoneDismissedToday = (milestoneId: string) => {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(getMilestoneDismissalKey(milestoneId)) === "true";
+};
+
 const getNextWorkoutDay = (
   days: ClientProgramDay[],
   completions: ClientWorkoutCompletion[]
@@ -268,6 +278,7 @@ const getNextWorkoutDay = (
 
 export default function ClientDashboardPage() {
   const router = useRouter();
+  const { includesNutrition } = useClientFeatures();
   const lastDashboardLoadAtRef = useRef(0);
 
   const [client, setClient] = useState<Client | null>(null);
@@ -298,6 +309,7 @@ export default function ClientDashboardPage() {
   // Companion widget state â€” only populated if companion feature is enabled.
   const [companionView, setCompanionView] = useState<ActiveCompanionView | null>(null);
   const [companionEnabled, setCompanionEnabled] = useState(false);
+  const [showLightweightOnboarding, setShowLightweightOnboarding] = useState(false);
   const [ptRequests, setPtRequests] = useState<PtSessionRequest[]>([]);
   const [preferredPtDateTime, setPreferredPtDateTime] = useState("");
   const [ptRequestNote, setPtRequestNote] = useState("");
@@ -372,7 +384,7 @@ const [showTour, setShowTour] = useState(false);
 
       setClientMilestone(existing);
       setMilestoneConfig(normalizedConfig);
-      setShowMilestoneModal(true);
+      setShowMilestoneModal(!isMilestoneDismissedToday(existing.id));
       return;
     }
 
@@ -392,7 +404,7 @@ const [showTour, setShowTour] = useState(false);
     if (newMilestone) {
       setClientMilestone(newMilestone);
       setMilestoneConfig(normalizedConfig);
-      setShowMilestoneModal(true);
+      setShowMilestoneModal(!isMilestoneDismissedToday(newMilestone.id));
     }
   };
 
@@ -429,6 +441,13 @@ const [showTour, setShowTour] = useState(false);
     }
 
     if (clientData.onboarding_complete === false) {
+      if (!includesNutrition) {
+        // Workout-only clients get a lightweight modal instead of the full onboarding page
+        setClient(clientData);
+        setShowLightweightOnboarding(true);
+        setLoading(false);
+        return;
+      }
       router.replace("/onboarding");
       return;
     }
@@ -473,6 +492,11 @@ if (!clientData.tour_completed_at) {
       .limit(1);
 
     if (!clientProgramError && (!clientProgramData || clientProgramData.length === 0)) {
+      if (!includesNutrition) {
+        // Workout-only: trainer assigns the programme directly, so just show the dashboard
+        setLoading(false);
+        return;
+      }
       router.replace("/onboarding");
       return;
     }
@@ -690,6 +714,16 @@ const handleSaveSteps = async () => {
 
   setSavingSteps(false);
 };
+
+  const handleDismissMilestone = () => {
+    if (clientMilestone && typeof window !== "undefined") {
+      window.localStorage.setItem(
+        getMilestoneDismissalKey(clientMilestone.id),
+        "true"
+      );
+    }
+    setShowMilestoneModal(false);
+  };
 
   const handleSubmitPtRequest = async () => {
     if (!client || !preferredPtDateTime) {
@@ -934,7 +968,8 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
 
             <ClientUnreadRepliesBanner clientId={client.id} />
 
-            <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
+            <div className={`grid w-full min-w-0 gap-4 ${includesNutrition ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
+              {includesNutrition && (
               <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
                 <Link href="/client/nutrition" className="block min-w-0">
                   <p className="text-sm text-ink-muted">Food Eaten Today</p>
@@ -997,6 +1032,7 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
                   </div>
                 </div>
               </div>
+              )}
 
               <div className="min-w-0 rounded-lg bg-surface-sunken p-4 shadow-subtle sm:p-5">
                 <ThisWeekWorkouts
@@ -1272,13 +1308,23 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
           <div
             className={`${styles.modalCard} max-h-[90vh] w-full max-w-2xl overflow-y-auto`}
           >
-            <div>
-              <h2 className={styles.h2}>
-                Week {milestoneConfig.week_number} Milestone
-              </h2>
-              <p className="mt-1 text-sm text-ink-muted">
-                Complete this milestone to continue your program
-              </p>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className={styles.h2}>
+                  Week {milestoneConfig.week_number} Milestone
+                </h2>
+                <p className="mt-1 text-sm text-ink-muted">
+                  Complete this milestone when you&apos;re ready.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleDismissMilestone}
+                className="rounded-full p-1 text-ink-muted transition hover:bg-surface-sunken hover:text-ink"
+                aria-label="Dismiss milestone"
+              >
+                <X size={18} />
+              </button>
             </div>
 
             <div className="mt-4 flex items-start gap-3 rounded-md border border-emerald/20 bg-emerald/5 p-3">
@@ -1443,6 +1489,16 @@ You&apos;re currently in Week {clientProgram?.current_week}                </p>
     }}
   />
 )}
+      {showLightweightOnboarding && client && (
+        <LightweightOnboardingModal
+          clientId={client.id}
+          initialName={client.full_name}
+          onComplete={() => {
+            setShowLightweightOnboarding(false);
+            loadDashboard();
+          }}
+        />
+      )}
     </>
   );
 }

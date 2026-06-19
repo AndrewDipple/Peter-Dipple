@@ -33,7 +33,7 @@ begin
   ) then
     alter table public.client_programs
       add constraint client_programs_status_check
-      check (status in ('assigning', 'active', 'superseded', 'completed'));
+      check (status in ('assigning', 'active', 'superseded', 'completed', 'paused'));
   end if;
 end $$;
 

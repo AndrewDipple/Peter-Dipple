@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 
@@ -38,7 +40,13 @@ type ShoppingListItem = {
 };
 
 export default function ClientShoppingListPage() {
+  const router = useRouter();
+  const { includesNutrition } = useClientFeatures();
   const [client, setClient] = useState<Client | null>(null);
+
+  useEffect(() => {
+    if (!includesNutrition) router.replace("/client/dashboard");
+  }, [includesNutrition, router]);
   const [plannedMeals, setPlannedMeals] = useState<MealPlan[]>([]);
   const [ingredients, setIngredients] = useState<RecipeIngredient[]>([]);
   const [loading, setLoading] = useState(true);

@@ -16,6 +16,7 @@ import {
   formatLongDate,
 } from "@/lib/dates";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useClientFeatures } from "@/contexts/ClientFeaturesContext";
 
 type Recipe = {
   id: string;
@@ -100,7 +101,14 @@ function NutritionSkeleton() {
 
 export default function ClientNutritionPage() {
   const router = useRouter();
+  const { includesNutrition } = useClientFeatures();
   const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (!includesNutrition) {
+      router.replace("/client/dashboard");
+    }
+  }, [includesNutrition, router]);
 
   const [clientId, setClientId] = useState<string | null>(null);
   const [calorieTarget, setCalorieTarget] = useState<number | null>(null);
