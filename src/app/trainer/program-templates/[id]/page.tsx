@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, GripVertical } from "lucide-react";
 
 type PageProps = {
   params: Promise<{
@@ -54,6 +54,11 @@ type RemovedDay = {
   exercises: ProgramTemplateExercise[];
 };
 
+type CopyDayOption = {
+  day: ProgramTemplateDay;
+  template: ProgramTemplate;
+};
+
 const workoutLocationOptions = [
   { value: "gym", label: "Gym" },
   { value: "home_weights", label: "Home weights" },
@@ -74,6 +79,24 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState("");
+  const [copyDayOptions, setCopyDayOptions] = useState<CopyDayOption[]>([]);
+  const [duplicateDaySourceId, setDuplicateDaySourceId] = useState("");
+  const [duplicateDayPreview, setDuplicateDayPreview] = useState<
+    ProgramTemplateExercise[]
+  >([]);
+  const [loadingDuplicateDayPreview, setLoadingDuplicateDayPreview] =
+    useState(false);
+  const [duplicatingDay, setDuplicatingDay] = useState(false);
+  const [copyDaySourceByDay, setCopyDaySourceByDay] = useState<
+    Record<string, string>
+  >({});
+  const [copyPreviewByDay, setCopyPreviewByDay] = useState<
+    Record<string, ProgramTemplateExercise[]>
+  >({});
+  const [loadingCopyPreviewByDay, setLoadingCopyPreviewByDay] = useState<
+    Record<string, boolean>
+  >({});
+  const [copyingDayId, setCopyingDayId] = useState<string | null>(null);
 
   const [exerciseSearch, setExerciseSearch] = useState<Record<string, string>>(
     {}
@@ -120,6 +143,75 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
 
   const sortExercises = (exercises: ProgramTemplateExercise[]) =>
     [...exercises].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const loadTemplateDayExercises = async (dayId: string) => {
+    const { data, error } = await supabase
+      .from("program_template_exercises")
+      .select("*")
+      .eq("program_template_day_id", dayId)
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []) as ProgramTemplateExercise[];
+  };
+
+  const loadCopyDayOptions = async () => {
+    const [{ data: templateData }, { data: dayData }] = await Promise.all([
+      supabase
+        .from("program_templates")
+        .select("id, name, duration_weeks, days_per_week, workout_location")
+        .order("name", { ascending: true }),
+      supabase
+        .from("program_template_days")
+        .select("*")
+        .order("sort_order", { ascending: true }),
+    ]);
+
+    const templatesById = new Map(
+      ((templateData ?? []) as ProgramTemplate[]).map((programTemplate) => [
+        programTemplate.id,
+        programTemplate,
+      ])
+    );
+
+    const options = ((dayData ?? []) as ProgramTemplateDay[])
+      .filter((day) => Boolean(templatesById.get(day.program_template_id)))
+      .sort((a, b) => {
+        const aTemplate = templatesById.get(a.program_template_id);
+        const bTemplate = templatesById.get(b.program_template_id);
+        const templateNameCompare = (aTemplate?.name ?? "").localeCompare(
+          bTemplate?.name ?? ""
+        );
+
+        if (templateNameCompare !== 0) return templateNameCompare;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      })
+      .map((day) => ({
+        day,
+        template: templatesById.get(day.program_template_id) as ProgramTemplate,
+      }));
+
+    setCopyDayOptions(options);
+    setCopyDaySourceByDay((prev) => {
+      const availableDayIds = new Set(options.map((option) => option.day.id));
+      const next: Record<string, string> = {};
+
+      for (const [targetDayId, sourceDayId] of Object.entries(prev)) {
+        if (
+          sourceDayId &&
+          sourceDayId !== targetDayId &&
+          availableDayIds.has(sourceDayId)
+        ) {
+          next[targetDayId] = sourceDayId;
+        }
+      }
+
+      return next;
+    });
+  };
 
   const persistDayOrder = async (
     reorderedDays: ProgramTemplateDay[],
@@ -185,6 +277,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     const resolvedParams = await params;
     const id = resolvedParams.id;
     setTemplateId(id);
+    await loadCopyDayOptions();
 
     const { data: templateData, error: templateError } = await supabase
       .from("program_templates")
@@ -326,6 +419,13 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
         day.id === dayId ? { ...day, day_name: dayName } : day
       )
     );
+    setCopyDayOptions((prev) =>
+      prev.map((option) =>
+        option.day.id === dayId
+          ? { ...option, day: { ...option.day, day_name: dayName } }
+          : option
+      )
+    );
   };
 
   const handleAddDay = async () => {
@@ -363,6 +463,122 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     setExercisesByDay((prev) => ({ ...prev, [data.id]: [] }));
     setNewDayName("");
     setAddingDay(false);
+    await loadCopyDayOptions();
+  };
+
+  const handleSelectDuplicateDaySource = async (sourceDayId: string) => {
+    setDuplicateDaySourceId(sourceDayId);
+
+    if (!sourceDayId) {
+      setDuplicateDayPreview([]);
+      return;
+    }
+
+    setLoadingDuplicateDayPreview(true);
+
+    try {
+      const exercises = await loadTemplateDayExercises(sourceDayId);
+      setDuplicateDayPreview(exercises);
+    } catch (error) {
+      console.error("Duplicate day preview error:", error);
+      alert("Could not load the exercises for that day");
+      setDuplicateDayPreview([]);
+    }
+
+    setLoadingDuplicateDayPreview(false);
+  };
+
+  const handleDuplicateDay = async () => {
+    if (!templateId || !duplicateDaySourceId) {
+      alert("Choose a day to duplicate first");
+      return;
+    }
+
+    const sourceOption = copyDayOptions.find(
+      (option) => option.day.id === duplicateDaySourceId
+    );
+
+    if (!sourceOption) {
+      alert("That source day is no longer available");
+      return;
+    }
+
+    setDuplicatingDay(true);
+
+    let sourceExercises = duplicateDayPreview;
+
+    if (sourceExercises.length === 0) {
+      try {
+        sourceExercises = await loadTemplateDayExercises(duplicateDaySourceId);
+      } catch (error) {
+        console.error("Duplicate day load error:", error);
+        alert("Could not load the exercises for that day");
+        setDuplicatingDay(false);
+        return;
+      }
+    }
+
+    if (sourceExercises.length === 0) {
+      alert("That day does not have any exercises to duplicate");
+      setDuplicatingDay(false);
+      return;
+    }
+
+    const nextSortOrder =
+      sortedDays.length > 0
+        ? Math.max(...sortedDays.map((day) => day.sort_order ?? 0)) + 1
+        : 1;
+
+    const { data: dayData, error: dayError } = await supabase
+      .from("program_template_days")
+      .insert([
+        {
+          program_template_id: templateId,
+          day_name: sourceOption.day.day_name ?? "Duplicated day",
+          sort_order: nextSortOrder,
+        },
+      ])
+      .select()
+      .single();
+
+    if (dayError || !dayData) {
+      alert("Could not create the duplicated day");
+      setDuplicatingDay(false);
+      return;
+    }
+
+    const { data: exerciseData, error: exerciseError } = await supabase
+      .from("program_template_exercises")
+      .insert(
+        sourceExercises.map((exercise, index) => ({
+          program_template_day_id: dayData.id,
+          exercise_name: exercise.exercise_name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          target_weight_kg: exercise.target_weight_kg,
+          sort_order: index + 1,
+        }))
+      )
+      .select();
+
+    if (exerciseError || !exerciseData) {
+      await supabase.from("program_template_days").delete().eq("id", dayData.id);
+      alert("Could not duplicate the exercises for that day");
+      setDuplicatingDay(false);
+      return;
+    }
+
+    setDays((prev) => [...prev, dayData]);
+    setExercisesByDay((prev) => ({
+      ...prev,
+      [dayData.id]: sortExercises(exerciseData as ProgramTemplateExercise[]),
+    }));
+    setRemovedDay(null);
+    setRemovedExercise(null);
+    setDuplicateDaySourceId("");
+    setDuplicateDayPreview([]);
+    setDuplicatingDay(false);
+    await loadCopyDayOptions();
   };
 
   const handleRemoveDay = async (dayId: string) => {
@@ -394,6 +610,108 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
       delete next[dayId];
       return next;
     });
+    await loadCopyDayOptions();
+  };
+
+  const handleSelectCopyDaySource = async (
+    targetDayId: string,
+    sourceDayId: string
+  ) => {
+    setCopyDaySourceByDay((prev) => ({ ...prev, [targetDayId]: sourceDayId }));
+
+    if (!sourceDayId) {
+      setCopyPreviewByDay((prev) => ({ ...prev, [targetDayId]: [] }));
+      return;
+    }
+
+    setLoadingCopyPreviewByDay((prev) => ({
+      ...prev,
+      [targetDayId]: true,
+    }));
+
+    try {
+      const exercises = await loadTemplateDayExercises(sourceDayId);
+      setCopyPreviewByDay((prev) => ({
+        ...prev,
+        [targetDayId]: exercises,
+      }));
+    } catch (error) {
+      console.error("Copy day preview error:", error);
+      alert("Could not load the exercises for that day");
+      setCopyPreviewByDay((prev) => ({ ...prev, [targetDayId]: [] }));
+      setLoadingCopyPreviewByDay((prev) => ({
+        ...prev,
+        [targetDayId]: false,
+      }));
+      return;
+    }
+
+    setLoadingCopyPreviewByDay((prev) => ({
+      ...prev,
+      [targetDayId]: false,
+    }));
+  };
+
+  const handleCopyDayExercises = async (targetDayId: string) => {
+    const sourceDayId = copyDaySourceByDay[targetDayId];
+    const sourceExercises = copyPreviewByDay[targetDayId] ?? [];
+
+    if (!sourceDayId) {
+      alert("Choose a day to copy from first");
+      return;
+    }
+
+    if (sourceExercises.length === 0) {
+      alert("That day does not have any exercises to copy");
+      return;
+    }
+
+    const currentExercises = exercisesByDay[targetDayId] ?? [];
+
+    if (currentExercises.length > 0) {
+      const confirmed = window.confirm(
+        `Copy ${sourceExercises.length} exercise${sourceExercises.length === 1 ? "" : "s"} into this day? Existing exercises will stay in place.`
+      );
+
+      if (!confirmed) return;
+    }
+
+    const nextSortOrder =
+      currentExercises.length > 0
+        ? Math.max(...currentExercises.map((exercise) => exercise.sort_order ?? 0))
+        : 0;
+
+    setCopyingDayId(targetDayId);
+
+    const { data, error } = await supabase
+      .from("program_template_exercises")
+      .insert(
+        sourceExercises.map((exercise, index) => ({
+          program_template_day_id: targetDayId,
+          exercise_name: exercise.exercise_name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          target_weight_kg: exercise.target_weight_kg,
+          sort_order: nextSortOrder + index + 1,
+        }))
+      )
+      .select();
+
+    if (error || !data) {
+      alert("Could not copy exercises into this day");
+      setCopyingDayId(null);
+      return;
+    }
+
+    setExercisesByDay((prev) => ({
+      ...prev,
+      [targetDayId]: sortExercises([
+        ...(prev[targetDayId] ?? []),
+        ...((data ?? []) as ProgramTemplateExercise[]),
+      ]),
+    }));
+    setRemovedExercise(null);
+    setCopyingDayId(null);
   };
 
   const handleSearchExercises = async (dayId: string, search: string) => {
@@ -748,6 +1066,10 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     handleCancelEditExercise(exercise.id);
   };
 
+  const selectedDuplicateDaySource = copyDayOptions.find(
+    (option) => option.day.id === duplicateDaySourceId
+  );
+
   return (
     <>
       <div className="mb-6 flex items-center gap-4">
@@ -893,26 +1215,103 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
           </div>
 
           <div className={styles.card}>
-            <div className="flex flex-col gap-4 md:flex-row md:items-end">
-              <div className="flex-1">
-                <label className="text-sm font-medium text-ink">
-                  Add new day
-                </label>
-                <input
-                  value={newDayName}
-                  onChange={(e) => setNewDayName(e.target.value)}
-                  className={styles.input}
-                  placeholder="e.g. Day 4 / Upper / Push"
-                />
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div>
+                <div className="flex flex-col gap-4 md:flex-row md:items-end lg:flex-col lg:items-stretch">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-ink">
+                      Add new day
+                    </label>
+                    <input
+                      value={newDayName}
+                      onChange={(e) => setNewDayName(e.target.value)}
+                      className={styles.input}
+                      placeholder="e.g. Day 4 / Upper / Push"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleAddDay}
+                    disabled={addingDay}
+                    className={styles.buttonPrimary}
+                  >
+                    {addingDay ? "Adding..." : "Add Day"}
+                  </button>
+                </div>
               </div>
 
-              <button
-                onClick={handleAddDay}
-                disabled={addingDay}
-                className={styles.buttonPrimary}
-              >
-                {addingDay ? "Adding..." : "Add Day"}
-              </button>
+              <div className="border-t border-border-subtle pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+                <div className="flex flex-col gap-4 md:flex-row md:items-end lg:flex-col lg:items-stretch">
+                  <div className="flex-1">
+                    <label className="text-sm font-medium text-ink">
+                      Duplicate existing day
+                    </label>
+                    <select
+                      value={duplicateDaySourceId}
+                      onChange={(event) =>
+                        handleSelectDuplicateDaySource(event.target.value)
+                      }
+                      className={styles.input}
+                    >
+                      <option value="">Choose a programme day</option>
+                      {copyDayOptions.map((option) => (
+                        <option key={option.day.id} value={option.day.id}>
+                          {option.template.name} -{" "}
+                          {option.day.day_name ?? "Unnamed day"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDuplicateDay}
+                    disabled={
+                      duplicatingDay ||
+                      loadingDuplicateDayPreview ||
+                      !duplicateDaySourceId ||
+                      duplicateDayPreview.length === 0
+                    }
+                    className={styles.buttonSecondary}
+                  >
+                    {duplicatingDay ? "Duplicating..." : "Duplicate Day"}
+                  </button>
+                </div>
+
+                {duplicateDaySourceId && (
+                  <div className="mt-4 rounded-xl bg-surface-sunken p-3">
+                    {loadingDuplicateDayPreview ? (
+                      <p className="text-sm text-ink-muted">
+                        Loading exercises...
+                      </p>
+                    ) : duplicateDayPreview.length === 0 ? (
+                      <p className="text-sm text-ink-muted">
+                        No exercises found for that day.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium text-ink">
+                          {selectedDuplicateDaySource?.template.name ??
+                            "Programme"}{" "}
+                          - {selectedDuplicateDaySource?.day.day_name ?? "Day"}{" "}
+                          ({duplicateDayPreview.length} exercise
+                          {duplicateDayPreview.length === 1 ? "" : "s"})
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {duplicateDayPreview.map((exercise) => (
+                            <span
+                              key={exercise.id}
+                              className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-1 text-xs text-ink-muted"
+                            >
+                              {exercise.exercise_name ?? "Exercise"}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -924,6 +1323,16 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
             sortedDays.map((day) => {
               const dayExercises = sortExercises(exercisesByDay[day.id] ?? []);
               const results = exerciseResults[day.id] ?? [];
+              const availableCopyDayOptions = copyDayOptions.filter(
+                (option) => option.day.id !== day.id
+              );
+              const selectedCopySourceId = copyDaySourceByDay[day.id] ?? "";
+              const selectedCopySource = copyDayOptions.find(
+                (option) => option.day.id === selectedCopySourceId
+              );
+              const copyPreview = copyPreviewByDay[day.id] ?? [];
+              const loadingCopyPreview =
+                loadingCopyPreviewByDay[day.id] ?? false;
 
               return (
                 <div
@@ -1021,6 +1430,91 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                   {reorderingDays && (
                     <p className="mt-2 text-xs text-ink-muted">Saving day order...</p>
                   )}
+
+                  <div className="mt-6 rounded-xl border border-slate-200 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
+                          <Copy size={16} />
+                          Copy day from existing plan
+                        </h3>
+                        <p className="mt-1 text-sm text-ink-muted">
+                          Use another programme day as the base for this day.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                      <div>
+                        <label className="text-sm font-medium text-ink">
+                          Source day
+                        </label>
+                        <select
+                          value={selectedCopySourceId}
+                          onChange={(event) =>
+                            handleSelectCopyDaySource(day.id, event.target.value)
+                          }
+                          className={styles.input}
+                        >
+                          <option value="">Choose a programme day</option>
+                          {availableCopyDayOptions.map((option) => (
+                            <option key={option.day.id} value={option.day.id}>
+                              {option.template.name} -{" "}
+                              {option.day.day_name ?? "Unnamed day"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyDayExercises(day.id)}
+                        disabled={
+                          copyingDayId === day.id ||
+                          loadingCopyPreview ||
+                          copyPreview.length === 0
+                        }
+                        className={styles.buttonSecondary}
+                      >
+                        {copyingDayId === day.id
+                          ? "Copying..."
+                          : "Copy exercises"}
+                      </button>
+                    </div>
+
+                    {selectedCopySourceId && (
+                      <div className="mt-4 rounded-xl bg-surface-sunken p-3">
+                        {loadingCopyPreview ? (
+                          <p className="text-sm text-ink-muted">
+                            Loading exercises...
+                          </p>
+                        ) : copyPreview.length === 0 ? (
+                          <p className="text-sm text-ink-muted">
+                            No exercises found for that day.
+                          </p>
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium text-ink">
+                              {selectedCopySource?.template.name ?? "Programme"} -{" "}
+                              {selectedCopySource?.day.day_name ?? "Day"} (
+                              {copyPreview.length} exercise
+                              {copyPreview.length === 1 ? "" : "s"})
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {copyPreview.map((exercise) => (
+                                <span
+                                  key={exercise.id}
+                                  className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-1 text-xs text-ink-muted"
+                                >
+                                  {exercise.exercise_name ?? "Exercise"}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   <div className="mt-6 rounded-xl border border-slate-200 p-4">
                     <h3 className="text-sm font-semibold text-ink">
