@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { styles } from "@/lib/design";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Copy, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Download, GripVertical } from "lucide-react";
 
 type PageProps = {
   params: Promise<{
@@ -44,6 +44,13 @@ type ExerciseLibraryItem = {
   primary_equipment: string | null;
 };
 
+type ExportExerciseDetails = ExerciseLibraryItem & {
+  youtube_short: string | null;
+  rest: number | null;
+  alternate: string | null;
+  alternative_exercises: string[] | null;
+};
+
 type RemovedExercise = {
   dayId: string;
   exercise: ProgramTemplateExercise;
@@ -64,6 +71,27 @@ const workoutLocationOptions = [
   { value: "home_weights", label: "Home weights" },
 ];
 
+const escapeHtml = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+const getSafeExternalUrl = (value: string | null | undefined) => {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 export default function ProgramTemplateDetailPage({ params }: PageProps) {
   const [templateId, setTemplateId] = useState("");
   const [template, setTemplate] = useState<ProgramTemplate | null>(null);
@@ -77,6 +105,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
   >({});
   const [loading, setLoading] = useState(true);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [exportingTemplate, setExportingTemplate] = useState(false);
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState("");
   const [copyDayOptions, setCopyDayOptions] = useState<CopyDayOption[]>([]);
@@ -1066,19 +1095,244 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     handleCancelEditExercise(exercise.id);
   };
 
+  const handleExportTemplate = async () => {
+    if (!template || sortedDays.length === 0) {
+      alert("Add at least one day before exporting this programme");
+      return;
+    }
+
+    setExportingTemplate(true);
+
+    const requestedExerciseNames = new Set(
+      sortedDays
+        .flatMap((day) => exercisesByDay[day.id] ?? [])
+        .map((exercise) => exercise.exercise_name?.trim().toLowerCase())
+        .filter((name): name is string => Boolean(name))
+    );
+
+    const { data: exerciseLibrary, error } = await supabase
+      .from("exercises")
+      .select(
+        "name, youtube_short, rest, target_muscle, movement_type, primary_equipment, alternate, alternative_exercises"
+      );
+
+    if (error) {
+      console.error("Programme export exercise lookup error:", error);
+      alert("Could not load the exercise details for this export");
+      setExportingTemplate(false);
+      return;
+    }
+
+    const exerciseDetailsByName = new Map<string, ExportExerciseDetails>();
+
+    for (const exercise of (exerciseLibrary ?? []) as ExportExerciseDetails[]) {
+      const normalisedName = exercise.name?.trim().toLowerCase();
+      if (normalisedName && requestedExerciseNames.has(normalisedName)) {
+        exerciseDetailsByName.set(normalisedName, exercise);
+      }
+    }
+
+    const locationLabel =
+      workoutLocationOptions.find(
+        (option) => option.value === templateWorkoutLocation
+      )?.label ?? "Not set";
+    const exportedAt = new Intl.DateTimeFormat("en-GB", {
+      dateStyle: "long",
+    }).format(new Date());
+
+    const daySections = sortedDays
+      .map((day, dayIndex) => {
+        const dayExercises = sortExercises(exercisesByDay[day.id] ?? []);
+        const exerciseRows = dayExercises
+          .map((exercise, exerciseIndex) => {
+            const details = exercise.exercise_name
+              ? exerciseDetailsByName.get(
+                  exercise.exercise_name.trim().toLowerCase()
+                )
+              : undefined;
+            const videoUrl = getSafeExternalUrl(details?.youtube_short);
+            const alternatives =
+              details?.alternative_exercises?.filter(Boolean).join(", ") ||
+              details?.alternate ||
+              "";
+            const extraDetails = [
+              details?.target_muscle
+                ? `<span><strong>Muscle:</strong> ${escapeHtml(details.target_muscle)}</span>`
+                : "",
+              details?.movement_type
+                ? `<span><strong>Movement:</strong> ${escapeHtml(details.movement_type)}</span>`
+                : "",
+              details?.primary_equipment
+                ? `<span><strong>Equipment:</strong> ${escapeHtml(details.primary_equipment)}</span>`
+                : "",
+              details?.rest
+                ? `<span><strong>Rest:</strong> ${escapeHtml(details.rest)} seconds</span>`
+                : "",
+              alternatives
+                ? `<span><strong>Alternatives:</strong> ${escapeHtml(alternatives)}</span>`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("");
+
+            return `
+              <tr>
+                <td class="number">${exerciseIndex + 1}</td>
+                <td>
+                  <strong>${escapeHtml(exercise.exercise_name || "Exercise")}</strong>
+                  ${extraDetails ? `<div class="details">${extraDetails}</div>` : ""}
+                  ${
+                    videoUrl
+                      ? `<a class="video" href="${escapeHtml(videoUrl)}" target="_blank" rel="noreferrer">Watch exercise video</a>`
+                      : ""
+                  }
+                </td>
+                <td>${escapeHtml(exercise.sets ?? "-")}</td>
+                <td>${escapeHtml(exercise.reps ?? "-")}</td>
+                <td>${
+                  exercise.target_weight_kg !== null
+                    ? `${escapeHtml(exercise.target_weight_kg)} kg`
+                    : "-"
+                }</td>
+              </tr>`;
+          })
+          .join("");
+
+        return `
+          <section class="day">
+            <div class="day-heading">
+              <span>Day ${dayIndex + 1}</span>
+              <h2>${escapeHtml(day.day_name || `Day ${dayIndex + 1}`)}</h2>
+              <p>${dayExercises.length} exercise${dayExercises.length === 1 ? "" : "s"}</p>
+            </div>
+            ${
+              dayExercises.length > 0
+                ? `<div class="table-wrap"><table>
+                    <thead><tr><th>#</th><th>Exercise</th><th>Sets</th><th>Reps</th><th>Target</th></tr></thead>
+                    <tbody>${exerciseRows}</tbody>
+                  </table></div>`
+                : '<p class="empty">No exercises added.</p>'
+            }
+          </section>`;
+      })
+      .join("");
+
+    const exportHtml = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(templateName || template.name)} - Workout Programme</title>
+  <style>
+    :root { color-scheme: light; --ink: #111; --muted: #595959; --line: #ddd; --soft: #f4f4f4; --gold: #d4af37; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eee; color: var(--ink); font-family: Arial, Helvetica, sans-serif; line-height: 1.45; }
+    main { width: min(100% - 32px, 980px); margin: 32px auto; background: #fff; padding: 48px; box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+    header { border-bottom: 4px solid var(--gold); padding-bottom: 24px; }
+    .brand { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 36px; line-height: 1.1; }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px 0 0; }
+    .summary div { background: var(--soft); padding: 12px 14px; }
+    .summary span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .summary strong { display: block; margin-top: 3px; }
+    .actions { display: flex; justify-content: flex-end; margin: 20px 0; }
+    button { border: 0; background: #111; color: #fff; padding: 10px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+    .day { margin-top: 32px; break-inside: avoid-page; }
+    .day-heading { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+    .day-heading > span { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    h2 { margin: 0; font-size: 22px; }
+    .day-heading p { margin: 0; color: var(--muted); font-size: 13px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #111; color: #fff; font-size: 12px; text-align: left; text-transform: uppercase; }
+    th, td { border: 1px solid var(--line); padding: 10px; vertical-align: top; }
+    th:first-child, td.number { width: 42px; text-align: center; }
+    th:nth-child(3), th:nth-child(4), th:nth-child(5) { width: 80px; }
+    .details { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .details span { display: inline-block; }
+    .video { display: inline-block; margin-top: 6px; color: #0759a5; font-size: 12px; font-weight: 700; }
+    .empty { color: var(--muted); }
+    footer { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 16px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 680px) {
+      main { width: 100%; margin: 0; padding: 24px 16px; box-shadow: none; }
+      h1 { font-size: 28px; }
+      .summary { grid-template-columns: 1fr; }
+      .day-heading { grid-template-columns: 1fr; gap: 2px; }
+      th, td { padding: 8px 6px; }
+    }
+    @media print {
+      body { background: #fff; }
+      main { width: 100%; margin: 0; padding: 0; box-shadow: none; }
+      .actions { display: none; }
+      a { color: #000; text-decoration: underline; }
+      .day { break-inside: auto; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="brand">Peter Training</p>
+      <h1>${escapeHtml(templateName || template.name)}</h1>
+      <div class="summary">
+        <div><span>Duration</span><strong>${escapeHtml(templateDurationWeeks || "-")} weeks</strong></div>
+        <div><span>Frequency</span><strong>${escapeHtml(templateDaysPerWeek || sortedDays.length)} days per week</strong></div>
+        <div><span>Location</span><strong>${escapeHtml(locationLabel)}</strong></div>
+      </div>
+    </header>
+    <div class="actions"><button type="button" onclick="window.print()">Print / Save as PDF</button></div>
+    ${daySections}
+    <footer>Exported ${escapeHtml(exportedAt)}. Video links require an internet connection.</footer>
+  </main>
+</body>
+</html>`;
+
+    const fileNameBase = (templateName || template.name || "programme")
+      .trim()
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase();
+    const blob = new Blob([exportHtml], { type: "text/html;charset=utf-8" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `${fileNameBase || "programme"}.html`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+    setExportingTemplate(false);
+  };
+
   const selectedDuplicateDaySource = copyDayOptions.find(
     (option) => option.day.id === duplicateDaySourceId
   );
 
   return (
     <>
-      <div className="mb-6 flex items-center gap-4">
-        <Link href="/trainer/program-templates" className={styles.buttonSecondary}>
-          ← Back
-        </Link>
-        <h1 className={styles.display}>
-          {template?.name || "Programme Template"}
-        </h1>
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
+          <Link
+            href="/trainer/program-templates"
+            className={styles.buttonSecondary}
+          >
+            ← Back
+          </Link>
+          <h1 className={`${styles.display} min-w-0 break-words`}>
+            {template?.name || "Programme Template"}
+          </h1>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleExportTemplate}
+          disabled={exportingTemplate || loading || sortedDays.length === 0}
+          className={`${styles.buttonSecondary} inline-flex shrink-0 items-center justify-center gap-2`}
+        >
+          <Download size={18} />
+          {exportingTemplate ? "Exporting..." : "Export Programme"}
+        </button>
       </div>
 
       {removedExercise && (
