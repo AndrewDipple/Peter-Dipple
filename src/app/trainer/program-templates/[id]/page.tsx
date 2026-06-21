@@ -47,8 +47,6 @@ type ExerciseLibraryItem = {
 type ExportExerciseDetails = ExerciseLibraryItem & {
   youtube_short: string | null;
   rest: number | null;
-  alternate: string | null;
-  alternative_exercises: string[] | null;
 };
 
 type RemovedExercise = {
@@ -1113,7 +1111,7 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
     const { data: exerciseLibrary, error } = await supabase
       .from("exercises")
       .select(
-        "name, youtube_short, rest, target_muscle, movement_type, primary_equipment, alternate, alternative_exercises"
+        "name, youtube_short, rest, target_muscle, movement_type, primary_equipment"
       );
 
     if (error) {
@@ -1151,10 +1149,6 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                 )
               : undefined;
             const videoUrl = getSafeExternalUrl(details?.youtube_short);
-            const alternatives =
-              details?.alternative_exercises?.filter(Boolean).join(", ") ||
-              details?.alternate ||
-              "";
             const extraDetails = [
               details?.target_muscle
                 ? `<span><strong>Muscle:</strong> ${escapeHtml(details.target_muscle)}</span>`
@@ -1167,9 +1161,6 @@ export default function ProgramTemplateDetailPage({ params }: PageProps) {
                 : "",
               details?.rest
                 ? `<span><strong>Rest:</strong> ${escapeHtml(details.rest)} seconds</span>`
-                : "",
-              alternatives
-                ? `<span><strong>Alternatives:</strong> ${escapeHtml(alternatives)}</span>`
                 : "",
             ]
               .filter(Boolean)
